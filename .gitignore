@@ -1,0 +1,14 @@
+# Whitelist: this folder is also a live data folder (profiles, backups, logs, state.json).
+# Only source files are tracked.
+/*
+!/.gitignore
+!/.github/
+!/app/
+!/installer/
+!/README.md
+!/LICENSE
+!/CHANGELOG.md
+
+/app/target/
+/installer/app.ico
+*.exe

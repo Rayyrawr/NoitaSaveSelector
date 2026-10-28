@@ -1,0 +1,37 @@
+# Push a tag like v1.2.3 (matching app/Cargo.toml) -> tests, exe, installer, GitHub release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check tag matches Cargo.toml
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} != Cargo.toml v$v" }
+      - name: Tests
+        working-directory: app
+        run: cargo test --release
+      - name: Inno Setup
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build exe + installer
+        shell: pwsh
+        run: ./installer/build.ps1
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          files: |
+            dist/NoitaSaveSelector-Setup-*.exe
+            dist/NoitaSaveSelector.exe
+            dist/NoitaSaveSelector.exe.sha256
