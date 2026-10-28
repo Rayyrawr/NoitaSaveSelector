@@ -452,10 +452,37 @@ pub fn claim_live(p: &Paths, st: &State) -> Result<()> {
     write_marker(p, id)
 }
 
+/// Which run a save holds: Noita names the run's stats session after the moment the run started
+/// (`session_stat_file="??STA/sessions/20261025-020815"` in world_state.xml). It stays the same
+/// across play sessions and changes with every new game. None when no run was started yet.
+pub fn run_id(save: &Path) -> Option<String> {
+    let text = fs::read_to_string(save.join("world_state.xml")).ok()?;
+    let start = text.find("session_stat_file=\"")? + "session_stat_file=\"".len();
+    let value = &text[start..start + text[start..].find('"')?];
+    let id = value.rsplit('/').next()?.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// The live save belongs to the active profile by its marker, but holds a different run than the
+/// stored copy: a new game or daily was started directly in Noita. Saving it into the profile
+/// would replace that profile's run, so it must not happen silently.
+pub fn live_is_other_run(p: &Paths, st: &State) -> bool {
+    let Some(active) = st.active.as_deref() else { return false };
+    if live_status(p) != LiveStatus::Owned(active.to_string()) {
+        return false;
+    }
+    match (run_id(&p.live_save), run_id(&p.profile_save(active))) {
+        (Some(live), Some(stored)) => live != stored,
+        _ => false, // a fresh profile gets its first run: that is the normal case
+    }
+}
+
 /// Store the current live save as a new profile (live stays as it is and becomes active).
+/// Works for foreign saves and for a run started outside the app under the active profile's
+/// marker; the previously active profile keeps its stored copy untouched.
 pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected: bool) -> Result<Profile> {
-    if live_status(p) != LiveStatus::Foreign {
-        bail!("The current save already belongs to a profile or does not exist.");
+    if live_status(p) == LiveStatus::Missing {
+        bail!("There is no save in Noita to import.");
     }
     let id = new_id(p);
     let prof = Profile {
@@ -768,6 +795,38 @@ mod tests {
         assert_eq!(read(&p.profile_save(&a.id).join("player.xml")), "a");
         let parked = list_snapshots_in(&p.backups().join("_unassigned"));
         assert_eq!(parked.len(), 1);
+    }
+
+    fn world_state(session: &str) -> String {
+        format!("<Entity>\n  <WorldStateComponent\n    day_count=\"3\"\n    session_stat_file=\"??STA/sessions/{session}\"\n  >\n  </WorldStateComponent>\n</Entity>")
+    }
+
+    #[test]
+    fn run_started_in_noita_is_imported_not_saved_over_the_profile() {
+        let e = env("newrun");
+        let p = &e.p;
+        let mut st = State::default();
+        put(&p.live_save.join("world_state.xml"), &world_state("20261025-020815"));
+        put(&p.live_save.join("player.xml"), "duo run");
+        let duo = import_live(p, &mut st, "Duo", Kind::Singleplayer, true).unwrap();
+        assert_eq!(run_id(&p.live_save).as_deref(), Some("20261025-020815"));
+        assert!(!live_is_other_run(p, &st));
+
+        // A daily is started directly in Noita: same marker, different run.
+        put(&p.live_save.join("world_state.xml"), &world_state("20261028-210000"));
+        put(&p.live_save.join("player.xml"), "daily");
+        assert!(live_is_other_run(p, &st));
+
+        let daily = import_live(p, &mut st, "Daily", Kind::Singleplayer, false).unwrap();
+        assert_eq!(st.active.as_deref(), Some(daily.id.as_str()));
+        assert_eq!(live_status(p), LiveStatus::Owned(daily.id.clone()));
+        assert!(!live_is_other_run(p, &st));
+        assert_eq!(read(&p.profile_save(&duo.id).join("player.xml")), "duo run");
+        assert_eq!(read(&p.profile_save(&daily.id).join("player.xml")), "daily");
+
+        // Switching back restores the duo run.
+        switch_to(p, &mut st, &duo.id).unwrap();
+        assert_eq!(read(&p.live_save.join("player.xml")), "duo run");
     }
 
     #[test]

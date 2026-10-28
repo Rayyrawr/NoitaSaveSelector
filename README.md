@@ -32,6 +32,8 @@ The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the
   - Noita Together: starts the Noita Together app + Noita
 - **Switching only works while Noita, the EW proxy and Noita Together are closed.**
 - When the game closes, the app saves into the active profile automatically (can be turned off).
+- *Import current run* stores whatever run is in Noita right now as its own profile, e.g. a daily or a new game you started directly in Noita. The profile that was active keeps its own run.
+- The app knows which run a save holds (Noita's run start time in `world_state.xml`). If Noita holds a different run than the active profile, nothing is saved automatically; a banner offers to import it as a new profile or to overwrite the profile on purpose.
 - *+ New profile* starts a fresh run. Mod list and unlocks are carried over, the multiplayer mods are switched on/off to match the type.
 
 ## What gets swapped?

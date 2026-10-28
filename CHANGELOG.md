@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 – 2026-10-28
+- New "Import current run" button: a run started directly in Noita (e.g. a daily) becomes its own profile; the previously active profile keeps its run
+- The app now recognizes which run a save holds. If Noita holds a different run than the active profile, it no longer saves automatically, and switching or "Save now" ask first (import as new profile, or overwrite the profile)
+- Header shows "In game: a different run" plus a banner in that case
+
 ## 1.1.2 – 2026-10-28
 - After a self-update the app tells Windows to refresh icons, so desktop shortcuts show the new icon right away
 

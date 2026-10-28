@@ -107,6 +107,7 @@ impl App {
                 ui.add_space(14.0);
                 let (text, color) = match &self.live {
                     LiveStatus::Owned(id) => match self.profiles.iter().find(|p| &p.id == id) {
+                        Some(_) if self.other_run => ("a different run".into(), WARN),
                         Some(p) => (p.name.clone(), kind_color(p.kind)),
                         None => ("(deleted profile)".into(), WARN),
                     },
@@ -127,6 +128,24 @@ impl App {
             });
         });
 
+        if self.other_run {
+            ui.add_space(8.0);
+            Frame::none()
+                .fill(WARN.gamma_multiply(0.10))
+                .stroke(Stroke::new(1.0_f32, WARN.gamma_multiply(0.45)))
+                .rounding(4.0)
+                .inner_margin(Margin::symmetric(14.0, 8.0))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        let name = self.active_name().unwrap_or_default();
+                        ui.label(RichText::new(format!("Noita holds a different run than \"{name}\" (started directly in Noita?).")).color(WARN));
+                        if ui.button("Import as new profile").clicked() {
+                            self.open_new_run_dialog();
+                        }
+                    });
+                });
+        }
         if self.live == LiveStatus::Foreign {
             ui.add_space(8.0);
             Frame::none()
@@ -186,8 +205,17 @@ impl App {
             if ui.add_sized([ui.available_width(), 32.0], egui::Button::new("+  New profile")).clicked() {
                 self.dialog = Some(Dialog::New { name: String::new(), kind: Kind::Singleplayer, keep_progress: true });
             }
-            if self.live == LiveStatus::Foreign && ui.add_sized([ui.available_width(), 28.0], egui::Button::new("Import current save")).clicked() {
-                self.open_import_dialog();
+            if self.live != LiveStatus::Missing
+                && ui
+                    .add_sized([ui.available_width(), 28.0], egui::Button::new("Import current run"))
+                    .on_hover_text("Started a run directly in Noita (e.g. a daily)?\nStore the run that is in Noita now as its own profile.")
+                    .clicked()
+            {
+                if self.other_run {
+                    self.open_new_run_dialog();
+                } else {
+                    self.open_import_dialog();
+                }
             }
             ui.add_space(6.0);
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
@@ -308,7 +336,7 @@ impl App {
                         if active {
                             tag(ui, "Active", ALIVE);
                         }
-                        if self.live == LiveStatus::Owned(p.id.clone()) {
+                        if self.live == LiveStatus::Owned(p.id.clone()) && !self.other_run {
                             tag(ui, "Loaded in game", INK_2);
                         }
                         if p.protected {

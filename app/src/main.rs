@@ -82,6 +82,8 @@ fn window_icon() -> egui::IconData {
 
 enum Dialog {
     Import { name: String, kind: Kind, protected: bool },
+    /// The live save is marked for the active profile but holds another run.
+    NewRun { name: String, kind: Kind },
     New { name: String, kind: Kind, keep_progress: bool },
     ConfirmDelete(String),
     ConfirmRestore(String, String),
@@ -124,6 +126,8 @@ struct App {
     update: Option<update::Release>,
     /// Running update check; `bool` = started by hand (report "up to date" too).
     update_rx: Option<(Receiver<Result<Option<update::Release>>>, bool)>,
+    /// A run started directly in Noita sits under the active profile's marker.
+    other_run: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -164,6 +168,7 @@ impl App {
             log_only_problems: true,
             update: None,
             update_rx: None,
+            other_run: false,
         };
         app.info(format!("Version {} – data: {}", update::VERSION, app.paths.root.display()));
         if detect::needs_search(&app.state.settings) {
@@ -188,6 +193,7 @@ impl App {
     fn reload(&mut self) {
         self.profiles = saves::load_profiles(&self.paths);
         self.live = saves::live_status(&self.paths);
+        self.other_run = saves::live_is_other_run(&self.paths, &self.state);
         self.cloud = sys::noita_cloud_enabled(&self.state.settings.steam_dir);
         if self.selected.as_ref().is_some_and(|s| !self.profiles.iter().any(|p| &p.id == s)) {
             self.selected = self.state.active.clone();
@@ -252,12 +258,22 @@ impl App {
 
     fn open_import_dialog(&mut self) {
         let kind = saves::detect_kind(&self.paths.live_save);
+        if matches!(self.live, LiveStatus::Owned(_)) {
+            // A run under an existing profile's marker: a copy or a run started in Noita.
+            self.dialog = Some(Dialog::Import { name: format!("Run {}", saves::now_human()), kind, protected: false });
+            return;
+        }
         let name = match kind {
             Kind::EntangledWorlds => "Entangled Worlds Run".to_string(),
             Kind::NoitaTogether => "Noita Together Run".to_string(),
             Kind::Singleplayer => "Singleplayer".to_string(),
         };
         self.dialog = Some(Dialog::Import { name, kind, protected: kind.is_multiplayer() });
+    }
+
+    fn open_new_run_dialog(&mut self) {
+        let kind = saves::detect_kind(&self.paths.live_save);
+        self.dialog = Some(Dialog::NewRun { name: format!("Run {}", saves::now_human()), kind });
     }
 
     fn game_running(&self) -> bool {
@@ -332,7 +348,11 @@ impl App {
             self.archive_logs(since);
             self.live = saves::live_status(&self.paths);
             let owned = matches!((&self.live, &self.state.active), (LiveStatus::Owned(o), Some(a)) if o == a);
-            if self.state.settings.auto_save_on_exit && owned {
+            if owned && saves::live_is_other_run(&self.paths, &self.state) {
+                self.info("Game closed – Noita holds a different run than the active profile, nothing saved automatically");
+                self.reload();
+                self.open_new_run_dialog();
+            } else if self.state.settings.auto_save_on_exit && owned {
                 self.info("Game closed – saving to profile …");
                 self.job("Auto-save", true, |p, st| Ok(format!("Auto-save: \"{}\" saved", saves::sync_active(p, st)?)));
             } else {
@@ -355,6 +375,12 @@ impl App {
         }
         if self.live == LiveStatus::Foreign {
             self.dialog = Some(Dialog::ConfirmForeign { target: id, play, ew_args });
+            return;
+        }
+        // Switching would first save the live run into the active profile and replace its run.
+        if self.other_run {
+            self.info("Decide first what happens with the run in Noita");
+            self.open_new_run_dialog();
             return;
         }
         self.do_switch(id, play, ew_args);
@@ -386,6 +412,10 @@ impl App {
     }
 
     fn sync_now(&mut self) {
+        if self.other_run {
+            self.open_new_run_dialog();
+            return;
+        }
         self.job("Save", true, |p, st| Ok(format!("\"{}\" saved", saves::sync_active(p, st)?)));
     }
 
@@ -504,8 +534,15 @@ impl App {
         let mut keep = true;
         match &mut dialog {
             Dialog::Import { name, kind, protected } => {
-                modal(ctx, "Import current save", 480.0).show(ctx, |ui| {
-                    ui.label("The save currently in Noita is stored as a profile.\nThe save itself is not changed.");
+                let owner = match &self.live {
+                    LiveStatus::Owned(id) => self.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()),
+                    _ => None,
+                };
+                modal(ctx, "Import current run", 480.0).show(ctx, |ui| {
+                    ui.label("The run currently in Noita is stored as a new profile and becomes the active one.\nThe save itself is not changed.");
+                    if let Some(owner) = &owner {
+                        ui.label(RichText::new(format!("\"{owner}\" keeps the run it has stored; nothing is written into it.")).small().color(theme::INK_MUTED));
+                    }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label("Name:");
@@ -523,6 +560,45 @@ impl App {
                                 let prof = saves::import_live(p, st, &n, k, pr)?;
                                 Ok(format!("Profile \"{}\" created and active", prof.name))
                             });
+                            keep = false;
+                        }
+                        if ui.button("Later").clicked() {
+                            keep = false;
+                        }
+                    });
+                });
+            }
+            Dialog::NewRun { name, kind } => {
+                let active = self.active_name().unwrap_or_default();
+                modal(ctx, "A different run is in Noita", 520.0).show(ctx, |ui| {
+                    ui.label(format!("The run in Noita is not the one stored in \"{active}\" – probably a daily or a new game started directly in Noita."));
+                    ui.label(RichText::new(format!("Nothing was saved. \"{active}\" still has its own run stored.")).small().color(theme::INK_MUTED));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(name);
+                    });
+                    kind_picker(ui, kind);
+                    if self.game_running() {
+                        ui.label(RichText::new("Close Noita / proxy / Noita Together first, the files are still in use.").color(theme::WARN));
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let idle = self.busy.is_none() && !self.game_running();
+                        if ui.add_enabled(idle && !name.trim().is_empty(), egui::Button::new(RichText::new("Import as new profile").strong())).clicked() {
+                            let (n, k) = (name.clone(), *kind);
+                            self.job("Import", true, move |p, st| {
+                                let prof = saves::import_live(p, st, &n, k, false)?;
+                                Ok(format!("Profile \"{}\" created from the run in Noita and active", prof.name))
+                            });
+                            keep = false;
+                        }
+                        if ui
+                            .add_enabled(idle, theme::danger_button(&format!("Overwrite \"{active}\"")))
+                            .on_hover_text("Replaces the run stored in this profile with the one in Noita.\nThe previous copy stays available as a snapshot.")
+                            .clicked()
+                        {
+                            self.job("Save", true, |p, st| Ok(format!("\"{}\" overwritten with the run in Noita", saves::sync_active(p, st)?)));
                             keep = false;
                         }
                         if ui.button("Later").clicked() {
@@ -778,7 +854,7 @@ fn modal<'a>(ctx: &egui::Context, title: impl Into<egui::WidgetText>, width: f32
 
 fn kind_picker(ui: &mut egui::Ui, kind: &mut Kind) {
     ui.horizontal(|ui| {
-        ui.label("Typ:");
+        ui.label("Type:");
         for k in Kind::ALL {
             ui.selectable_value(kind, k, RichText::new(k.label()).color(kind_color(k)).strong());
         }
