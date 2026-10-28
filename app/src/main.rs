@@ -85,6 +85,7 @@ enum Dialog {
     ConfirmForeign { target: String, play: bool, ew_args: Vec<String> },
     Settings(Settings),
     Update(update::Release),
+    Uninstall { delete_data: bool },
 }
 
 type JobResult = (Result<String>, State);
@@ -471,6 +472,21 @@ impl App {
         }
     }
 
+    /// Leave the live save00 / EW save_state alone (it stays playable in Noita), optionally remove
+    /// the data folder contents, then hand over to the uninstaller and exit.
+    fn uninstall(&mut self, delete_data: bool) {
+        let res = (|| -> Result<()> {
+            if delete_data {
+                saves::delete_app_data(&self.paths)?;
+            }
+            sys::start_uninstall()
+        })();
+        match res {
+            Ok(()) => std::process::exit(0),
+            Err(e) => self.info(format!("ERROR: uninstall failed: {e:#}")),
+        }
+    }
+
     /// Download + swap the exe, then restart into the new version.
     fn install_update(&mut self, r: update::Release) {
         self.job("Update", true, move |_, _| {
@@ -483,10 +499,9 @@ impl App {
     fn dialogs(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.dialog.take() else { return };
         let mut keep = true;
-        let center = egui::Align2::CENTER_CENTER;
         match &mut dialog {
             Dialog::Import { name, kind, protected } => {
-                egui::Window::new("Import current save").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, "Import current save", 480.0).show(ctx, |ui| {
                     ui.label("The save currently in Noita is stored as a profile.\nThe save itself is not changed.");
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -514,7 +529,7 @@ impl App {
                 });
             }
             Dialog::New { name, kind, keep_progress } => {
-                egui::Window::new("New profile").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, "New profile", 480.0).show(ctx, |ui| {
                     ui.label("Starts a fresh run. The mod list is taken from the current save,\nmultiplayer mods are switched on/off to match the type.");
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -541,7 +556,7 @@ impl App {
             }
             Dialog::ConfirmDelete(id) => {
                 let name = self.profiles.iter().find(|p| &p.id == id).map(|p| p.name.clone()).unwrap_or_default();
-                egui::Window::new("Delete profile?").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, "Delete profile?", 480.0).show(ctx, |ui| {
                     ui.label(format!("Delete \"{name}\"?\nIt is moved to backups\\_deleted, not deleted permanently."));
                     ui.horizontal(|ui| {
                         if ui.button("Delete").clicked() {
@@ -556,7 +571,7 @@ impl App {
                 });
             }
             Dialog::ConfirmRestore(id, snap) => {
-                egui::Window::new("Restore snapshot?").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, "Restore snapshot?", 480.0).show(ctx, |ui| {
                     ui.label(format!("Reset the profile to {snap}?\nThe current state is stored as its own snapshot first."));
                     ui.horizontal(|ui| {
                         if ui.button("Restore").clicked() {
@@ -571,7 +586,7 @@ impl App {
                 });
             }
             Dialog::ConfirmForeign { target, play, ew_args } => {
-                egui::Window::new("Unknown save").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, "Unknown save", 480.0).show(ctx, |ui| {
                     ui.label("The current Noita save belongs to no profile.\nRecommended: import it as a profile first.");
                     ui.horizontal(|ui| {
                         if ui.button("Import first").clicked() {
@@ -590,31 +605,23 @@ impl App {
                 });
             }
             Dialog::Settings(s) => {
-                egui::Window::new("Settings").anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
-                    egui::Grid::new("settings").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
+                modal(ctx, "Settings", 620.0).show(ctx, |ui| {
+                    let idle = self.busy.is_none();
+                    // Body scrolls, footer stays visible however small the window is.
+                    let body_h = (ctx.screen_rect().height() - 190.0).max(120.0);
+                    egui::ScrollArea::vertical().max_height(body_h).auto_shrink([false, true]).show(ui, |ui| {
+                        theme::caption(ui, "Programs", theme::INK_MUTED);
+                        ui.add_space(4.0);
                         for (label, val) in [
                             ("noita.exe", &mut s.noita_exe),
                             ("Entangled Worlds noita_proxy.exe", &mut s.ew_proxy_exe),
                             ("Noita Together.exe", &mut s.nt_exe),
                             ("Steam folder", &mut s.steam_dir),
                         ] {
-                            ui.label(label);
-                            ui.add(egui::TextEdit::singleline(val).desired_width(420.0));
-                            ui.end_row();
+                            ui.label(RichText::new(label).small().color(theme::INK_2));
+                            ui.add(egui::TextEdit::singleline(val).desired_width(f32::INFINITY));
+                            ui.add_space(4.0);
                         }
-                        ui.label("Snapshots per profile");
-                        ui.add(egui::DragValue::new(&mut s.keep_snapshots).range(1..=50));
-                        ui.end_row();
-                    });
-                    ui.checkbox(&mut s.auto_save_on_exit, "Save into the profile automatically when the game closes");
-                    ui.checkbox(&mut s.close_steam_for_singleplayer, "Singleplayer: close Steam first and start Noita without Steam");
-                    ui.label(RichText::new("Entangled Worlds needs Steam (lobby/network) – Steam is started when needed.").small());
-                    ui.checkbox(&mut s.check_updates, "Check GitHub for updates at startup");
-                    ui.label(RichText::new(format!("Version: {}", update::VERSION)).small());
-                    ui.label(RichText::new(format!("Data folder: {}", self.paths.root.display())).small());
-                    ui.label(RichText::new(format!("Live save: {}", self.paths.live_save.display())).small());
-                    ui.horizontal(|ui| {
-                        let idle = self.busy.is_none();
                         if ui
                             .add_enabled(idle, egui::Button::new("Find paths automatically"))
                             .on_hover_text("Searches for Steam, Noita, the EW proxy and Noita Together again.\nFound paths replace the entries above.")
@@ -624,12 +631,44 @@ impl App {
                             self.search_paths(true);
                             keep = false;
                         }
-                        if ui.add_enabled(self.update_rx.is_none(), egui::Button::new("Check for updates")).clicked() {
-                            self.check_update(true);
-                            keep = false;
+
+                        ui.add_space(14.0);
+                        theme::caption(ui, "Behavior", theme::INK_MUTED);
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Snapshots per profile");
+                            ui.add(egui::DragValue::new(&mut s.keep_snapshots).range(1..=50));
+                        });
+                        ui.checkbox(&mut s.auto_save_on_exit, "Save into the profile automatically when the game closes");
+                        ui.checkbox(&mut s.close_steam_for_singleplayer, "Singleplayer: close Steam first and start Noita without Steam");
+                        ui.label(RichText::new("Entangled Worlds needs Steam (lobby/network) – Steam is started when needed.").small().color(theme::INK_MUTED));
+                        ui.checkbox(&mut s.check_updates, "Check GitHub for updates at startup");
+
+                        ui.add_space(14.0);
+                        theme::caption(ui, "About", theme::INK_MUTED);
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(format!("Version {}", update::VERSION)).small());
+                        ui.label(RichText::new(format!("Data folder: {}", self.paths.root.display())).small());
+                        ui.label(RichText::new(format!("Live save: {}", self.paths.live_save.display())).small());
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.add_enabled(self.update_rx.is_none(), egui::Button::new("Check for updates")).clicked() {
+                                self.check_update(true);
+                                keep = false;
+                            }
+                            if ui.button("Open data folder").clicked() {
+                                sys::open_folder(&self.paths.root);
+                            }
+                        });
+
+                        ui.add_space(14.0);
+                        theme::caption(ui, "Uninstall", theme::DANGER);
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Removes the app. The save that is loaded in Noita stays as it is.").small().color(theme::INK_MUTED));
+                        if ui.add_enabled(idle, theme::danger_button("Uninstall …")).clicked() {
+                            self.dialog = Some(Dialog::Uninstall { delete_data: false });
                         }
                     });
-                    ui.add_space(4.0);
+                    ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button("Save").clicked() {
                             self.state.settings = s.clone();
@@ -646,8 +685,46 @@ impl App {
                     });
                 });
             }
+            Dialog::Uninstall { delete_data } => {
+                let in_noita = match &self.live {
+                    LiveStatus::Owned(id) => self.profiles.iter().find(|p| &p.id == id).cloned(),
+                    _ => None,
+                };
+                modal(ctx, "Uninstall Noita Save Selector", 520.0).show(ctx, |ui| {
+                    ui.label(match &in_noita {
+                        Some(p) => format!("\"{}\" is loaded in Noita right now and stays there, so you can keep playing it without this app.", p.name),
+                        None => "The save that is in Noita right now stays where it is.".to_string(),
+                    });
+                    ui.label(RichText::new("Steam, Noita, Entangled Worlds and Noita Together are not touched.").small().color(theme::INK_MUTED));
+                    ui.add_space(8.0);
+                    ui.checkbox(delete_data, "Also delete the stored profiles, snapshots and logs");
+                    if *delete_data {
+                        let lost: Vec<&str> = self.profiles.iter().filter(|p| in_noita.as_ref().is_none_or(|n| n.id != p.id)).map(|p| p.name.as_str()).collect();
+                        if !lost.is_empty() {
+                            ui.label(RichText::new(format!("These profiles exist only in the data folder and will be gone for good: {}", lost.join(", "))).color(theme::DANGER));
+                        }
+                        ui.label(RichText::new(format!("Data folder: {}", self.paths.root.display())).small().color(theme::INK_MUTED));
+                    } else {
+                        ui.label(RichText::new(format!("The data folder is kept, a reinstall picks it up again: {}", self.paths.root.display())).small().color(theme::INK_MUTED));
+                    }
+                    if sys::uninstaller().is_none() {
+                        ui.label(RichText::new("Portable copy: the exe is deleted once the app has closed.").small().color(theme::INK_MUTED));
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let label = if *delete_data { "Uninstall and delete data" } else { "Uninstall" };
+                        if ui.add_enabled(self.busy.is_none(), theme::danger_button(label)).clicked() {
+                            self.uninstall(*delete_data);
+                            keep = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                    });
+                });
+            }
             Dialog::Update(r) => {
-                egui::Window::new(format!("Update to version {}", r.version)).anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
+                modal(ctx, format!("Update to version {}", r.version), 480.0).show(ctx, |ui| {
                     ui.label(format!("Installed: {}, new: {}", update::VERSION, r.version));
                     if !r.notes.is_empty() {
                         ui.add_space(4.0);
@@ -680,6 +757,20 @@ impl App {
             self.dialog = Some(dialog);
         }
     }
+}
+
+/// Centered dialog with a width tied to the screen. A content-sized window jitters when the
+/// screen is too small: wrapping changes its width, which changes the wrapping again.
+fn modal<'a>(ctx: &egui::Context, title: impl Into<egui::WidgetText>, width: f32) -> egui::Window<'a> {
+    let screen = ctx.screen_rect();
+    let w = width.min(screen.width() - 48.0).max(220.0);
+    egui::Window::new(title)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .collapsible(false)
+        .resizable(false)
+        .min_width(w)
+        .max_width(w)
+        .max_height((screen.height() - 48.0).max(160.0))
 }
 
 fn kind_picker(ui: &mut egui::Ui, kind: &mut Kind) {

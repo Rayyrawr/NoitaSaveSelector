@@ -6,7 +6,11 @@
 #endif
 
 [Setup]
-AppId={{6E1F3C2A-9B47-4C1D-8E55-0A7C2B9D4F11}
+#ifndef AppGuid
+  ; Only overridden for test installs next to a real one.
+  #define AppGuid "6E1F3C2A-9B47-4C1D-8E55-0A7C2B9D4F11"
+#endif
+AppId={{{#AppGuid}}
 AppName=Noita Save Selector
 AppVersion={#AppVersion}
 AppVerName=Noita Save Selector {#AppVersion}
@@ -24,7 +28,10 @@ UninstallDisplayIcon={app}\NoitaSaveSelector.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-AppMutex=NoitaSaveSelectorMutex
+#ifndef AppMutexName
+  #define AppMutexName "NoitaSaveSelectorMutex"
+#endif
+AppMutex={#AppMutexName}
 CloseApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -74,7 +81,8 @@ begin
     '(the one containing state.json and profiles\) and everything is reused.',
     False, '');
   DataPage.Add('');
-  DataPage.Values[0] := GetPreviousData('DataDir', ExpandConstant('{localappdata}\NoitaSaveSelector'));
+  // /DATADIR=... on the command line wins (scripted installs).
+  DataPage.Values[0] := ExpandConstant('{param:DATADIR|' + GetPreviousData('DataDir', ExpandConstant('{localappdata}\NoitaSaveSelector')) + '}');
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
@@ -119,7 +127,8 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  if CurUninstallStep = usPostUninstall then
+  // The app's own Uninstall button runs this silently after asking itself.
+  if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
     MsgBox('Your profiles and backups were NOT deleted.' + #13#10 +
       'They are still in the data folder (default: %LOCALAPPDATA%\NoitaSaveSelector).', mbInformation, MB_OK);
 end;

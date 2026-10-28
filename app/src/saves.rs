@@ -171,6 +171,24 @@ fn data_root() -> PathBuf {
     std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("NoitaSaveSelector")).unwrap_or(exe_dir)
 }
 
+/// Remove what the app stored (uninstall with "delete data"). Only known entries go: in portable
+/// mode the data folder is the exe's folder and may hold unrelated files. The live save00 keeps
+/// its content; only our marker is removed so a later install offers to import it again.
+pub fn delete_app_data(p: &Paths) -> Result<()> {
+    for d in ["profiles", "backups", "logs"] {
+        let d = p.root.join(d);
+        if d.exists() {
+            fs::remove_dir_all(&d).with_context(|| format!("Delete: {}", d.display()))?;
+        }
+    }
+    for f in ["state.json", "state.tmp", "detected.txt", "crash.log"] {
+        let _ = fs::remove_file(p.root.join(f));
+    }
+    let _ = fs::remove_file(p.live_save.join(MARKER));
+    let _ = fs::remove_dir(&p.root); // only succeeds when nothing else is left
+    Ok(())
+}
+
 pub fn now_stamp() -> String {
     chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string()
 }

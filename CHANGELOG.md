@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 – 2026-10-28
+- Settings no longer jitter when the window is small: dialogs have a fixed width, the settings body scrolls and Save/Cancel stay visible
+- Settings are grouped into Programs, Behavior, About and Uninstall
+- New "Uninstall" button in Settings. The save that is loaded in Noita stays where it is; optionally the stored profiles, snapshots and logs are deleted too
+- Installer: `/DATADIR=<folder>` for scripted installs
+
 ## 1.1.0 – 2026-10-28
 - The whole app and the installer are now in English
 - New icon: a perk-style tile with a floppy disk

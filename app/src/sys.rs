@@ -141,15 +141,19 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Claim the per-session mutex (the installer checks the same name). The handle is kept for the
 /// lifetime of the process. `wait`: after a self-update the old instance may still be closing.
+static INSTANCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub fn single_instance(wait: bool) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
     use windows_sys::Win32::System::Threading::CreateMutexW;
-    let name = wide("NoitaSaveSelectorMutex");
+    // NSS_INSTANCE gives test runs their own mutex (like the other NSS_* overrides).
+    let name = wide(&format!("NoitaSaveSelectorMutex{}", std::env::var("NSS_INSTANCE").unwrap_or_default()));
     for _ in 0..if wait { 60 } else { 1 } {
         // SAFETY: plain Win32 calls with a valid, NUL-terminated name.
         unsafe {
             let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
             if !h.is_null() && GetLastError() != ERROR_ALREADY_EXISTS {
+                INSTANCE.store(h as usize, std::sync::atomic::Ordering::SeqCst);
                 return true;
             }
             if !h.is_null() {
@@ -168,4 +172,43 @@ pub fn message_box(title: &str, text: &str) {
     unsafe {
         MessageBoxW(std::ptr::null_mut(), m.as_ptr(), t.as_ptr(), MB_OK | MB_ICONINFORMATION);
     }
+}
+
+/// Let go of the instance mutex, so the uninstaller does not wait for this (closing) process.
+fn release_instance() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    let h = INSTANCE.swap(0, std::sync::atomic::Ordering::SeqCst);
+    if h != 0 {
+        // SAFETY: the handle came from CreateMutexW and is closed exactly once.
+        unsafe {
+            CloseHandle(h as _);
+        }
+    }
+}
+
+/// Inno Setup's uninstaller next to the exe; None for a portable copy.
+pub fn uninstaller() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.parent()?.join("unins000.exe")).filter(|p| p.exists())
+}
+
+/// Start removing the app. The caller exits right after.
+pub fn start_uninstall() -> Result<()> {
+    let exe = std::env::current_exe()?;
+    release_instance();
+    match uninstaller() {
+        // Our own dialog already asked, so no second confirmation.
+        Some(u) => {
+            Command::new(u).args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]).spawn().context("Could not start the uninstaller")?;
+        }
+        // Portable: delete the exe once this process is gone.
+        None => {
+            Command::new("cmd")
+                .raw_arg(format!("/c ping -n 3 127.0.0.1 >nul & del /f /q \"{}\"", exe.display()))
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .context("Could not schedule deleting the exe")?;
+        }
+    }
+    Ok(())
 }

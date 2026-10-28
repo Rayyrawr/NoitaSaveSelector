@@ -18,6 +18,9 @@ At startup the app asks GitHub for a newer version (can be turned off). If there
 *Update now* downloads the new exe, checks its SHA-256 checksum, swaps it in and restarts. Profiles and settings stay as they are.
 Manually: *Settings > Check for updates*. Installing a newer installer over the old version works too.
 
+## Uninstall
+*Settings > Uninstall* (or Windows "Apps & features"). The save that is loaded in Noita right now stays there, so you can keep playing it without the app. By default the data folder is kept; tick *Also delete the stored profiles, snapshots and logs* to remove it too (the dialog lists which profiles would be lost).
+
 ## First start
 The app notices that the current save does not belong to a profile yet and offers to import it.
 The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the enabled mods. The save itself is not changed.
