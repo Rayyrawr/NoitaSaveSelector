@@ -28,9 +28,19 @@ jobs:
       - name: Build exe + installer
         shell: pwsh
         run: ./installer/build.ps1
+      - name: Release notes (this version's CHANGELOG section)
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          $out = @(); $on = $false
+          foreach ($l in Get-Content CHANGELOG.md -Encoding utf8) {
+            if ($l -match '^## ') { $on = $l -match "^## $([regex]::Escape($v))\b"; continue }
+            if ($on) { $out += $l }
+          }
+          ($out -join "`n").Trim() | Set-Content -Encoding utf8 notes.md
       - uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG.md
+          body_path: notes.md
           files: |
             dist/NoitaSaveSelector-Setup-*.exe
             dist/NoitaSaveSelector.exe

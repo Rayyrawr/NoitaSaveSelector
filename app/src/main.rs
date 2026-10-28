@@ -975,7 +975,7 @@ impl App {
             }
             Dialog::Update(r) => {
                 egui::Window::new(format!("Update auf Version {}", r.version)).anchor(center, [0.0, 0.0]).collapsible(false).resizable(false).show(ctx, |ui| {
-                    ui.label(format!("Installiert: {}  →  neu: {}", update::VERSION, r.version));
+                    ui.label(format!("Installiert: {}, neu: {}", update::VERSION, r.version));
                     if !r.notes.is_empty() {
                         ui.add_space(4.0);
                         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
@@ -1051,7 +1051,7 @@ fn launch_for(kind: Kind, s: &Settings, ew_args: &[String]) -> Result<String> {
             }
             if ew_args.is_empty() {
                 sys::launch_with(&s.ew_proxy_exe, ew_args)?;
-                return Ok("Entangled Worlds Proxy gestartet (Lobby erstellen/beitreten → Noita startet)".into());
+                return Ok("Entangled Worlds Proxy gestartet (Lobby erstellen/beitreten, dann startet Noita)".into());
             }
             // Direct IP via the proxy's CLI: it runs without a window and does not start Noita itself.
             sys::launch_ew_pinned(&s.ew_proxy_exe, ew_args)?;
