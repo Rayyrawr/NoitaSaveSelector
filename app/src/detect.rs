@@ -166,7 +166,7 @@ fn valid_file(p: &str) -> bool {
 }
 
 /// Fill in paths that are empty or point nowhere (`force`: search all of them again and
-/// replace those where something was found). Returns one German report line per program.
+/// replace those where something was found). Returns one report line per program.
 pub fn fill(s: &mut Settings, force: bool) -> Vec<String> {
     let mut report = Vec::new();
     let mut set = |field: &mut String, label: &str, valid: bool, find: &mut dyn FnMut() -> Option<PathBuf>| {
@@ -177,10 +177,10 @@ pub fn fill(s: &mut Settings, force: bool) -> Vec<String> {
         match find() {
             Some(p) => {
                 *field = p.to_string_lossy().into_owned();
-                report.push(format!("{label}: gefunden - {field}"));
+                report.push(format!("{label}: found - {field}"));
             }
             None if valid => report.push(format!("{label}: {field}")),
-            None => report.push(format!("{label}: nicht gefunden")),
+            None => report.push(format!("{label}: not found")),
         }
     };
 

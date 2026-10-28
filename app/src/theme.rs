@@ -1,4 +1,4 @@
-//! Look & feel. "Modern" is the retro slot look, "Classic" is plain egui dark (the original design).
+//! Look & feel: the modern-retro slot look.
 
 use crate::saves::Kind;
 use eframe::egui::{
@@ -6,14 +6,6 @@ use eframe::egui::{
     text::{LayoutJob, TextFormat},
     vec2,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum UiTheme {
-    #[default]
-    Modern,
-    Classic,
-}
 
 // Tokens: one neutral hue, surfaces step up in lightness only.
 pub const CAVE: Color32 = Color32::from_rgb(20, 20, 23); // canvas
@@ -42,14 +34,8 @@ pub fn kind_color(k: Kind) -> Color32 {
     }
 }
 
-pub fn apply(ctx: &egui::Context, theme: UiTheme) {
-    match theme {
-        UiTheme::Classic => {
-            ctx.set_style(egui::Style::default());
-            ctx.set_visuals(egui::Visuals::dark());
-        }
-        UiTheme::Modern => ctx.set_style(modern_style()),
-    }
+pub fn apply(ctx: &egui::Context) {
+    ctx.set_style(modern_style());
 }
 
 fn modern_style() -> egui::Style {
@@ -203,23 +189,14 @@ pub fn danger_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(text.to_string()).color(DANGER))
 }
 
-/// "2026-10-26_02-17-22[_n]" → "26.10.2026  02:17:22"
+/// "2026-10-26_02-17-22[_n]" → "2026-10-26  02:17:22"
 pub fn pretty_stamp(s: &str) -> String {
     let b = s.as_bytes();
     if s.len() >= 19 && b[4] == b'-' && b[10] == b'_' {
         let rest = &s[19..];
-        let rest = rest.trim_start_matches('_').replace('-', " ");
-        format!(
-            "{}.{}.{}  {}:{}:{}{}{}",
-            &s[8..10],
-            &s[5..7],
-            &s[0..4],
-            &s[11..13],
-            &s[14..16],
-            &s[17..19],
-            if rest.is_empty() { "" } else { "  " },
-            rest
-        )
+        // Snapshots from before 1.1 carry a German suffix.
+        let rest = rest.trim_start_matches('_').replace("vor-Wiederherstellung", "before-restore").replace('-', " ");
+        format!("{}  {}:{}:{}{}{}", &s[..10], &s[11..13], &s[14..16], &s[17..19], if rest.is_empty() { "" } else { "  " }, rest)
     } else {
         s.to_string()
     }

@@ -77,7 +77,7 @@ fn spawn(exe: &str, args: &[&str]) -> Result<()> {
 fn spawn_env(exe: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<()> {
     let path = Path::new(exe);
     if !path.exists() {
-        bail!("Nicht gefunden: {exe}\n(Pfad in den Einstellungen anpassen)");
+        bail!("Not found: {exe}\n(adjust the path in Settings)");
     }
     let mut cmd = Command::new(path);
     cmd.args(args);
@@ -85,7 +85,7 @@ fn spawn_env(exe: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<()> {
     if let Some(dir) = path.parent() {
         cmd.current_dir(dir);
     }
-    cmd.spawn().with_context(|| format!("Starten fehlgeschlagen: {exe}"))?;
+    cmd.spawn().with_context(|| format!("Failed to start: {exe}"))?;
     Ok(())
 }
 

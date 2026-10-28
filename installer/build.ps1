@@ -24,4 +24,4 @@ Copy-Item "$root\app\target\release\NoitaSaveSelector.exe" $dist -Force
 $sha = [System.Security.Cryptography.SHA256]::Create()
 $hash = -join ($sha.ComputeHash([System.IO.File]::ReadAllBytes("$dist\NoitaSaveSelector.exe")) | ForEach-Object { $_.ToString('x2') })
 "$hash  NoitaSaveSelector.exe" | Set-Content -NoNewline -Encoding ascii "$dist\NoitaSaveSelector.exe.sha256"
-Write-Host "Fertig: dist\NoitaSaveSelector-Setup-$version.exe (v$version)"
+Write-Host "Done: dist\NoitaSaveSelector-Setup-$version.exe (v$version)"

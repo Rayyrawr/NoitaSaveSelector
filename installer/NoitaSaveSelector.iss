@@ -1,4 +1,4 @@
-; Noita Save Selector – Installer (Inno Setup 6)
+; Noita Save Selector installer (Inno Setup 6)
 ; Build: installer\build.ps1  (or: ISCC /DAppVersion=1.0.0 installer\NoitaSaveSelector.iss)
 
 #ifndef AppVersion
@@ -30,7 +30,6 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
-Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
@@ -41,7 +40,7 @@ Source: "..\app\target\release\NoitaSaveSelector.exe"; DestDir: "{app}"; Flags: 
 
 [Icons]
 Name: "{group}\Noita Save Selector"; Filename: "{app}\NoitaSaveSelector.exe"
-Name: "{group}\Daten-Ordner"; Filename: "{code:GetDataDir}"
+Name: "{group}\Data folder"; Filename: "{code:GetDataDir}"
 Name: "{group}\{cm:UninstallProgram,Noita Save Selector}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Noita Save Selector"; Filename: "{app}\NoitaSaveSelector.exe"; Tasks: desktopicon
 
@@ -67,12 +66,12 @@ end;
 procedure InitializeWizard;
 begin
   DataPage := CreateInputDirPage(wpSelectDir,
-    'Daten-Ordner',
-    'Wo sollen Profile, Snapshots und Logs liegen?',
-    'Hier landen die gespeicherten Spielstände (pro Profil ca. 50-150 MB plus Snapshots).' + #13#10 +
-    'Bei einem Update oder einer Neuinstallation bleibt dieser Ordner unangetastet.' + #13#10#13#10 +
-    'Du hast den Selector schon portabel benutzt? Dann hier den alten Ordner wählen ' +
-    '(der mit state.json und profiles\) - alles wird weiterverwendet.',
+    'Data folder',
+    'Where should profiles, snapshots and logs be stored?',
+    'This is where the stored saves go (about 50-150 MB per profile, plus snapshots).' + #13#10 +
+    'Updating or reinstalling never touches this folder.' + #13#10#13#10 +
+    'Used the selector portably before? Pick that old folder here ' +
+    '(the one containing state.json and profiles\) and everything is reused.',
     False, '');
   DataPage.Add('');
   DataPage.Values[0] := GetPreviousData('DataDir', ExpandConstant('{localappdata}\NoitaSaveSelector'));
@@ -85,7 +84,7 @@ end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
-  Result := MemoDirInfo + NewLine + NewLine + 'Daten-Ordner:' + NewLine + Space + DataPage.Values[0];
+  Result := MemoDirInfo + NewLine + NewLine + 'Data folder:' + NewLine + Space + DataPage.Values[0];
   if MemoTasksInfo <> '' then
     Result := Result + NewLine + NewLine + MemoTasksInfo;
 end;
@@ -101,7 +100,7 @@ begin
     ForceDirectories(DataPage.Values[0]);
     SaveStringToFile(ExpandConstant('{app}\data_dir.txt'), DataPage.Values[0], False);
     // Let the app look for Steam, Noita, the Entangled Worlds proxy and Noita Together.
-    WizardForm.StatusLabel.Caption := 'Suche Noita, Steam, Entangled Worlds und Noita Together ...';
+    WizardForm.StatusLabel.Caption := 'Looking for Noita, Steam, Entangled Worlds and Noita Together ...';
     Exec(ExpandConstant('{app}\NoitaSaveSelector.exe'), '--detect', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Detected := '';
     if LoadStringsFromFile(AddBackslash(DataPage.Values[0]) + 'detected.txt', Lines) then
@@ -114,13 +113,13 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if (CurPageID = wpFinished) and (Detected <> '') then
     WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 +
-      'Gefundene Programme:' + Detected + #13#10#13#10 +
-      'Fehlendes kannst du in der App unter Einstellungen eintragen oder dort neu suchen lassen.';
+      'Programs found:' + Detected + #13#10#13#10 +
+      'Anything missing can be entered in the app under Settings, or searched for again there.';
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-    MsgBox('Deine Profile und Backups wurden NICHT gelöscht.' + #13#10 +
-      'Sie liegen weiterhin im Daten-Ordner (Standard: %LOCALAPPDATA%\NoitaSaveSelector).', mbInformation, MB_OK);
+    MsgBox('Your profiles and backups were NOT deleted.' + #13#10 +
+      'They are still in the data folder (default: %LOCALAPPDATA%\NoitaSaveSelector).', mbInformation, MB_OK);
 end;

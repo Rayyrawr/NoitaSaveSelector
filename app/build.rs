@@ -1,17 +1,8 @@
-//! Turns assets/icon.txt (16x16 pixel art) into a multi-size .ico and embeds it with version info.
+//! Turns assets/icon.txt (16x16 pixel art, perk tile with a floppy disk) into a multi-size .ico and embeds it with version info.
 
 use std::io::Write;
 
-fn color(c: char) -> [u8; 4] {
-    match c {
-        'C' => [150, 100, 60, 255],
-        'G' => [200, 200, 215, 255],
-        'P' => [140, 80, 210, 255],
-        'W' => [230, 210, 255, 255],
-        'D' => [90, 45, 150, 255],
-        _ => [0, 0, 0, 0],
-    }
-}
+include!("assets/icon_art.rs");
 
 /// One 32-bit BMP icon image (BGRA, bottom-up, plus the 1-bit AND mask).
 fn bmp(rows: &[Vec<[u8; 4]>], size: usize) -> Vec<u8> {
@@ -36,8 +27,9 @@ fn bmp(rows: &[Vec<[u8; 4]>], size: usize) -> Vec<u8> {
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.txt");
+    println!("cargo:rerun-if-changed=assets/icon_art.rs");
     let art = std::fs::read_to_string("assets/icon.txt").unwrap();
-    let rows: Vec<Vec<[u8; 4]>> = art.lines().filter(|l| !l.is_empty()).map(|l| l.chars().map(color).collect()).collect();
+    let rows = icon_pixels(&art);
 
     let sizes = [16usize, 32, 48, 64, 128, 256];
     let images: Vec<Vec<u8>> = sizes.iter().map(|&s| bmp(&rows, s)).collect();

@@ -22,10 +22,10 @@ impl App {
         };
         let mut text = st.label().to_string();
         if net.peers() > 0 {
-            text.push_str(&format!(" · {} Mitspieler", net.peers()));
+            text.push_str(&format!(" · {} player(s)", net.peers()));
         }
         if net.incidents > 0 {
-            text.push_str(&format!(" · {} Störung(en)", net.incidents));
+            text.push_str(&format!(" · {} incident(s)", net.incidents));
         }
         Some((text, color))
     }
@@ -37,7 +37,7 @@ impl App {
 
     pub(super) fn stop_proxy(&mut self) {
         let n = sys::kill_proxy();
-        self.info(if n > 0 { "EW Proxy beendet".to_string() } else { "Kein EW Proxy gefunden".to_string() });
+        self.info(if n > 0 { "EW proxy stopped".to_string() } else { "No EW proxy found".to_string() });
         self.last_poll = Instant::now() - Duration::from_secs(10);
     }
 
@@ -47,10 +47,10 @@ impl App {
         panel().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                caption(ui, "Verbindung", INK_MUTED);
+                caption(ui, "Connection", INK_MUTED);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let before = self.state.settings.ew_direct_ip;
-                    ui.selectable_value(&mut self.state.settings.ew_direct_ip, true, "Direkt-IP (Tailscale)");
+                    ui.selectable_value(&mut self.state.settings.ew_direct_ip, true, "Direct IP (Tailscale)");
                     ui.selectable_value(&mut self.state.settings.ew_direct_ip, false, "Steam");
                     if before != self.state.settings.ew_direct_ip {
                         self.save_settings();
@@ -60,28 +60,28 @@ impl App {
             ui.add_space(6.0);
 
             if !self.state.settings.ew_direct_ip {
-                ui.label(RichText::new("Standard und laut EW-Entwicklern am zuverlässigsten. Lobby im Proxy-Fenster erstellen, Code kopieren und dem Mitspieler schicken.").color(INK_2));
+                ui.label(RichText::new("Default and, according to the EW developers, the most reliable. Create a lobby in the proxy window, copy the code and send it to your friend.").color(INK_2));
                 ui.add_space(4.0);
-                ui.label(RichText::new("Dafür einfach oben „Spielen“ / „Aktivieren & Spielen“ nutzen.").small().color(INK_MUTED));
+                ui.label(RichText::new("Just use 'Play' / 'Activate & play' above.").small().color(INK_MUTED));
                 return;
             }
 
             // Direct IP
             let port = self.state.settings.ew_port;
             egui::Grid::new("ew_ip").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-                caption(ui, "Deine IP", INK_2);
+                caption(ui, "Your IP", INK_2);
                 ui.horizontal(|ui| match self.ts_ip.clone() {
                     Some(ip) => {
                         let addr = format!("{ip}:{port}");
                         ui.label(RichText::new(&addr).monospace().color(INK));
-                        if ui.small_button("Kopieren").on_hover_text("Diese Adresse gibt dein Mitspieler im Proxy unter „Per IP verbinden“ ein").clicked() {
+                        if ui.small_button("Copy").on_hover_text("Your friend enters this address in the proxy under 'Connect by IP'").clicked() {
                             ui.ctx().copy_text(addr.clone());
-                            self.info(format!("{addr} in die Zwischenablage kopiert"));
+                            self.info(format!("{addr} copied to the clipboard"));
                         }
                     }
                     None => {
-                        ui.label(RichText::new("Tailscale nicht gefunden oder nicht verbunden").color(WARN));
-                        if ui.small_button("Erneut prüfen").clicked() {
+                        ui.label(RichText::new("Tailscale not found or not connected").color(WARN));
+                        if ui.small_button("Check again").clicked() {
                             self.ts_ip = sys::tailscale_ip();
                         }
                     }
@@ -93,24 +93,24 @@ impl App {
                     if ui.add(egui::DragValue::new(&mut self.state.settings.ew_port).range(1024..=65535)).changed() {
                         self.save_settings();
                     }
-                    ui.label(RichText::new("UDP · Standard 21251").small().color(INK_MUTED));
+                    ui.label(RichText::new("UDP · default 21251").small().color(INK_MUTED));
                 });
                 ui.end_row();
 
-                caption(ui, "Hosten", INK_2);
+                caption(ui, "Host", INK_2);
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(!locked, egui::Button::new(format!("Per IP hosten (Port {port})"))).clicked() {
+                    if ui.add_enabled(!locked, egui::Button::new(format!("Host via IP (port {port})"))).clicked() {
                         self.activate_with(p.id.clone(), true, vec!["--host".into(), port.to_string()]);
                     }
                 });
                 ui.end_row();
 
-                caption(ui, "Beitreten", INK_2);
+                caption(ui, "Join", INK_2);
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut self.state.settings.ew_join).hint_text("100.x.y.z:21251").desired_width(170.0).font(egui::TextStyle::Monospace));
                     let target = self.state.settings.ew_join.trim().to_string();
                     let valid = target.parse::<std::net::SocketAddr>().is_ok();
-                    if ui.add_enabled(!locked && valid, egui::Button::new("Verbinden")).on_disabled_hover_text("Format: IP:Port, z.B. 100.101.102.103:21251").clicked() {
+                    if ui.add_enabled(!locked && valid, egui::Button::new("Connect")).on_disabled_hover_text("Format: IP:port, e.g. 100.101.102.103:21251").clicked() {
                         self.save_settings();
                         self.activate_with(p.id.clone(), true, vec!["--lobby".into(), target]);
                     }
@@ -119,7 +119,7 @@ impl App {
             });
             ui.add_space(6.0);
             ui.label(
-                RichText::new("Im IP-Modus läuft der Proxy ohne eigenes Fenster. Verbindung und Logs siehst du hier in der App. Nach dem Spielen „Proxy beenden“.")
+                RichText::new("In IP mode the proxy runs without a window. Connection and logs are shown here in the app. After playing, click 'Stop proxy'.")
                     .small()
                     .color(INK_MUTED),
             );
@@ -130,35 +130,35 @@ impl App {
 
     pub(super) fn logs_view(&mut self, ui: &mut Ui) {
         let Some(p) = self.edit.clone() else {
-            ui.label(RichText::new("Links ein Profil wählen.").color(INK_MUTED));
+            ui.label(RichText::new("Pick a profile on the left.").color(INK_MUTED));
             return;
         };
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("Logs · {}", p.name)).size(20.0).strong().color(INK));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Ordner öffnen").clicked() {
+                if ui.button("Open folder").clicked() {
                     let d = ewlog::logs_dir(&self.paths, &p.id);
                     let _ = std::fs::create_dir_all(&d);
                     sys::open_folder(&d);
                 }
                 let can = self.state.active.as_deref() == Some(p.id.as_str());
                 if ui
-                    .add_enabled(can, egui::Button::new("Aktuelle Logs übernehmen"))
-                    .on_hover_text("Kopiert ew_log.txt und Noitas logger.txt jetzt ins Archiv dieses Profils")
-                    .on_disabled_hover_text("Nur für das aktive Profil – die Logs gehören zur zuletzt gespielten Session")
+                    .add_enabled(can, egui::Button::new("Archive current logs"))
+                    .on_hover_text("Copies ew_log.txt and Noita's logger.txt into this profile's archive now")
+                    .on_disabled_hover_text("Only for the active profile – the logs belong to the last played session")
                     .clicked()
                 {
                     self.archive_logs(None);
                 }
             });
         });
-        ui.label(RichText::new("Nach jeder Session werden die Logs automatisch hierher kopiert. Der EW-Proxy selbst behält nur die letzten zwei.").small().color(INK_MUTED));
+        ui.label(RichText::new("After every session the logs are copied here automatically. The EW proxy itself keeps only the last two.").small().color(INK_MUTED));
         ui.add_space(10.0);
 
         if self.logs.is_empty() {
             panel().show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Noch keine Logs für dieses Profil.").color(INK_2));
+                ui.label(RichText::new("No logs for this profile yet.").color(INK_2));
             });
             return;
         }
@@ -189,7 +189,7 @@ impl App {
         ui.add_space(10.0);
 
         let Some(loaded) = &self.log_loaded else {
-            ui.label(RichText::new("Session auswählen, um die Auswertung zu sehen.").color(INK_MUTED));
+            ui.label(RichText::new("Select a session to see its summary.").color(INK_MUTED));
             return;
         };
         let s = &loaded.summary;
@@ -197,7 +197,7 @@ impl App {
         // Summary
         panel().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            caption(ui, "Auswertung", INK_MUTED);
+            caption(ui, "Summary", INK_MUTED);
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 18.0;
@@ -211,13 +211,13 @@ impl App {
                     stat(ui, "Start", start.clone(), INK);
                 }
                 if let Some(d) = &s.duration {
-                    stat(ui, "Dauer", d.clone(), INK);
+                    stat(ui, "Duration", d.clone(), INK);
                 }
-                stat(ui, "Mitspieler", s.peers.to_string(), INK);
-                stat(ui, "Störungen", s.incidents.len().to_string(), if s.incidents.is_empty() { ALIVE } else { WARN });
+                stat(ui, "Players", s.peers.to_string(), INK);
+                stat(ui, "Incidents", s.incidents.len().to_string(), if s.incidents.is_empty() { ALIVE } else { WARN });
                 stat(ui, "Kicks", s.kicks.to_string(), if s.kicks == 0 { ALIVE } else { DANGER });
-                stat(ui, "Warnungen", s.warns.to_string(), if s.warns == 0 { INK } else { WARN });
-                stat(ui, "Fehler", s.errors.to_string(), if s.errors == 0 { INK } else { DANGER });
+                stat(ui, "Warnings", s.warns.to_string(), if s.warns == 0 { INK } else { WARN });
+                stat(ui, "Errors", s.errors.to_string(), if s.errors == 0 { INK } else { DANGER });
             });
             if !s.incidents.is_empty() {
                 ui.add_space(8.0);
@@ -227,9 +227,9 @@ impl App {
                         ui.label(RichText::new(format!("{} – {}", inc.from, inc.to)).monospace().color(INK));
                         ui.label(
                             RichText::new(format!(
-                                "{} Paket-/Stau-Meldungen{}",
+                                "{} congestion message(s){}",
                                 inc.congestion,
-                                if inc.kicks > 0 { format!(", {} Kick(s)", inc.kicks) } else { String::new() }
+                                if inc.kicks > 0 { format!(", {} kick(s)", inc.kicks) } else { String::new() }
                             ))
                             .color(INK_2),
                         );
@@ -237,7 +237,7 @@ impl App {
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("Stau-Meldungen heißen: Steam nimmt keine Pakete mehr an den Mitspieler an – meist Aussetzer seiner Leitung/WLAN oder der Steam-Relay-Route. Nach 30 s Stau kickt der Proxy.")
+                    RichText::new("Congestion means Steam no longer accepts packets for that player – usually dropouts on their line/Wi-Fi or the Steam relay route. After 30 s of congestion the proxy kicks them.")
                         .small()
                         .color(INK_MUTED),
                 );
@@ -252,9 +252,9 @@ impl App {
         panel().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                caption(ui, &format!("Einträge  {total}"), INK_MUTED);
+                caption(ui, &format!("Entries  {total}"), INK_MUTED);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.checkbox(&mut toggle, "nur Warnungen & Verbindung");
+                    ui.checkbox(&mut toggle, "only warnings & connection");
                 });
             });
             ui.add_space(4.0);

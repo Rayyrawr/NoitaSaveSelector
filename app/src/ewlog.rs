@@ -20,7 +20,7 @@ pub enum LogKind {
 impl LogKind {
     pub fn label(self) -> &'static str {
         match self {
-            LogKind::Proxy => "EW-Proxy",
+            LogKind::Proxy => "EW proxy",
             LogKind::Noita => "Noita",
         }
     }
@@ -298,7 +298,7 @@ pub fn load(path: &Path) -> Result<Loaded> {
     }
     s.peers = peers.len();
     if let (Some(a), Some(b)) = (first_t, last_t) {
-        s.start = Some(a.format("%d.%m.%Y %H:%M").to_string());
+        s.start = Some(a.format("%Y-%m-%d %H:%M").to_string());
         s.end = Some(b.format("%H:%M").to_string());
         let m = (b - a).num_minutes();
         s.duration = Some(if m >= 60 { format!("{} h {:02} min", m / 60, m % 60) } else { format!("{m} min") });
@@ -323,10 +323,10 @@ pub enum NetState {
 impl NetState {
     pub fn label(self) -> &'static str {
         match self {
-            NetState::Waiting => "wartet auf Mitspieler",
-            NetState::Good => "stabil",
-            NetState::Shaky => "wackelt",
-            NetState::Kicked => "Abbruch / Kick",
+            NetState::Waiting => "waiting for players",
+            NetState::Good => "stable",
+            NetState::Shaky => "shaky",
+            NetState::Kicked => "dropped / kicked",
         }
     }
 }

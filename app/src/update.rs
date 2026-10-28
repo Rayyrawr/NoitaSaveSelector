@@ -52,7 +52,7 @@ pub fn check() -> Result<Option<Release>> {
     let body = match resp {
         Ok(r) => r.into_string()?,
         Err(ureq::Error::Status(404, _)) => return Ok(None), // no release published yet
-        Err(e) => return Err(anyhow!("GitHub nicht erreichbar: {e}")),
+        Err(e) => return Err(anyhow!("GitHub not reachable: {e}")),
     };
     let json: serde_json::Value = serde_json::from_str(&body)?;
     let tag = json["tag_name"].as_str().unwrap_or_default().to_string();
@@ -63,7 +63,7 @@ pub fn check() -> Result<Option<Release>> {
     let url_of = |name: &str| {
         assets.iter().find(|a| a["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name))).and_then(|a| a["browser_download_url"].as_str()).map(str::to_string)
     };
-    let exe_url = url_of(ASSET).ok_or_else(|| anyhow!("Release {tag} enthält keine {ASSET}"))?;
+    let exe_url = url_of(ASSET).ok_or_else(|| anyhow!("Release {tag} has no {ASSET}"))?;
     Ok(Some(Release {
         version: tag.trim_start_matches(['v', 'V']).to_string(),
         notes: json["body"].as_str().unwrap_or_default().trim().to_string(),
@@ -74,7 +74,7 @@ pub fn check() -> Result<Option<Release>> {
 }
 
 fn download(url: &str, limit: u64) -> Result<Vec<u8>> {
-    let resp = agent().get(url).set("User-Agent", &format!("NoitaSaveSelector/{VERSION}")).call().with_context(|| format!("Download fehlgeschlagen: {url}"))?;
+    let resp = agent().get(url).set("User-Agent", &format!("NoitaSaveSelector/{VERSION}")).call().with_context(|| format!("Download failed: {url}"))?;
     let mut buf = Vec::new();
     resp.into_reader().take(limit).read_to_end(&mut buf)?;
     Ok(buf)
@@ -93,24 +93,24 @@ pub fn install(r: &Release) -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let data = download(&r.exe_url, 100 * 1024 * 1024)?;
     if data.len() < 100_000 || &data[..2] != b"MZ" {
-        bail!("Download ist keine gültige exe ({} Bytes)", data.len());
+        bail!("Download is not a valid exe ({} bytes)", data.len());
     }
-    let sha_url = r.sha_url.as_deref().ok_or_else(|| anyhow!("Release ohne Prüfsumme – Update abgebrochen"))?;
+    let sha_url = r.sha_url.as_deref().ok_or_else(|| anyhow!("Release has no checksum – update aborted"))?;
     let sha_text = String::from_utf8_lossy(&download(sha_url, 4096)?).to_lowercase();
     let expected = sha_text.split_whitespace().next().unwrap_or_default().to_string();
     let actual = hex(&Sha256::digest(&data));
     if expected != actual {
-        bail!("Prüfsumme stimmt nicht (erwartet {expected}, erhalten {actual}) – Update abgebrochen");
+        bail!("Checksum mismatch (expected {expected}, got {actual}) – update aborted");
     }
 
     let new = exe.with_extension("update.exe");
     let old = old_exe(&exe);
-    std::fs::write(&new, &data).with_context(|| format!("Schreiben fehlgeschlagen: {}", new.display()))?;
+    std::fs::write(&new, &data).with_context(|| format!("Write failed: {}", new.display()))?;
     let _ = std::fs::remove_file(&old);
-    std::fs::rename(&exe, &old).context("Laufende exe konnte nicht umbenannt werden")?;
+    std::fs::rename(&exe, &old).context("Could not rename the running exe")?;
     if let Err(e) = std::fs::rename(&new, &exe) {
         let _ = std::fs::rename(&old, &exe);
-        return Err(e).context("Neue exe konnte nicht eingesetzt werden");
+        return Err(e).context("Could not put the new exe in place");
     }
     Ok(exe)
 }

@@ -75,11 +75,10 @@ pub struct Settings {
     pub keep_snapshots: usize,
     pub close_steam_for_singleplayer: bool,
     pub auto_save_on_exit: bool,
-    pub theme: crate::theme::UiTheme,
     /// Entangled Worlds connection: Steam lobby or direct IP (e.g. over Tailscale).
     pub ew_direct_ip: bool,
     pub ew_port: u16,
-    /// Last lobby code / ip:port typed into "Beitreten".
+    /// Last lobby code / ip:port typed into "Join".
     pub ew_join: String,
     /// Ask GitHub for a newer version at startup.
     pub check_updates: bool,
@@ -96,7 +95,6 @@ impl Default for Settings {
             keep_snapshots: 8,
             close_steam_for_singleplayer: false,
             auto_save_on_exit: true,
-            theme: Default::default(),
             ew_direct_ip: false,
             ew_port: 21251,
             ew_join: String::new(),
@@ -178,7 +176,7 @@ pub fn now_stamp() -> String {
 }
 
 pub fn now_human() -> String {
-    chrono::Local::now().format("%d.%m.%Y %H:%M").to_string()
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
 
 // ---------------------------------------------------------------- state & profiles
@@ -322,15 +320,15 @@ pub fn adjust_mod_config(text: &str, kind: Kind) -> String {
 // ---------------------------------------------------------------- filesystem helpers
 
 pub fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst).with_context(|| format!("Ordner anlegen: {}", dst.display()))?;
-    for e in fs::read_dir(src).with_context(|| format!("Ordner lesen: {}", src.display()))? {
+    fs::create_dir_all(dst).with_context(|| format!("Create folder: {}", dst.display()))?;
+    for e in fs::read_dir(src).with_context(|| format!("Read folder: {}", src.display()))? {
         let e = e?;
         let from = e.path();
         let to = dst.join(e.file_name());
         if e.file_type()?.is_dir() {
             copy_dir(&from, &to)?;
         } else {
-            fs::copy(&from, &to).with_context(|| format!("Kopieren: {}", from.display()))?;
+            fs::copy(&from, &to).with_context(|| format!("Copy: {}", from.display()))?;
         }
     }
     Ok(())
@@ -365,7 +363,7 @@ fn copy_verified(src: &Path, dst_tmp: &Path) -> Result<()> {
     let (a, b) = (dir_stats(src), dir_stats(dst_tmp));
     if a != b {
         let _ = fs::remove_dir_all(dst_tmp);
-        bail!("Kopie unvollständig ({} Dateien/{} Bytes statt {}/{}) – abgebrochen", b.0, b.1, a.0, a.1);
+        bail!("Copy incomplete ({} files/{} bytes instead of {}/{}) – aborted", b.0, b.1, a.0, a.1);
     }
     Ok(())
 }
@@ -379,7 +377,7 @@ fn move_dir(src: &Path, dst: &Path) -> Result<()> {
         return Ok(());
     }
     copy_verified(src, dst)?;
-    fs::remove_dir_all(src).with_context(|| format!("Löschen: {}", src.display()))?;
+    fs::remove_dir_all(src).with_context(|| format!("Delete: {}", src.display()))?;
     Ok(())
 }
 
@@ -396,7 +394,7 @@ fn replace_dir(src: &Path, target: &Path, old_dest: Option<&Path>) -> Result<()>
             None => fs::remove_dir_all(target)?,
         }
     }
-    fs::rename(&tmp, target).with_context(|| format!("Umbenennen nach {}", target.display()))?;
+    fs::rename(&tmp, target).with_context(|| format!("Rename to {}", target.display()))?;
     Ok(())
 }
 
@@ -429,9 +427,9 @@ fn write_marker(p: &Paths, id: &str) -> Result<()> {
 
 /// Mark the live save as belonging to the active profile (e.g. when the marker went missing).
 pub fn claim_live(p: &Paths, st: &State) -> Result<()> {
-    let id = st.active.as_deref().ok_or_else(|| anyhow!("Kein Profil aktiv."))?;
+    let id = st.active.as_deref().ok_or_else(|| anyhow!("No active profile."))?;
     if !p.live_save.exists() {
-        bail!("Kein Live-Spielstand vorhanden.");
+        bail!("No live save present.");
     }
     write_marker(p, id)
 }
@@ -439,7 +437,7 @@ pub fn claim_live(p: &Paths, st: &State) -> Result<()> {
 /// Store the current live save as a new profile (live stays as it is and becomes active).
 pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected: bool) -> Result<Profile> {
     if live_status(p) != LiveStatus::Foreign {
-        bail!("Der aktuelle Spielstand gehört schon zu einem Profil oder existiert nicht.");
+        bail!("The current save already belongs to a profile or does not exist.");
     }
     let id = new_id(p);
     let prof = Profile {
@@ -499,13 +497,13 @@ pub fn create_profile(p: &Paths, name: &str, kind: Kind, keep_progress: bool, te
 
 /// Copy the live save (and EW state) back into the active profile, keeping a snapshot of the old copy.
 pub fn sync_active(p: &Paths, st: &State) -> Result<String> {
-    let id = st.active.clone().ok_or_else(|| anyhow!("Kein Profil aktiv."))?;
+    let id = st.active.clone().ok_or_else(|| anyhow!("No active profile."))?;
     match live_status(p) {
         LiveStatus::Owned(owner) if owner == id => {}
-        LiveStatus::Missing => bail!("Kein Live-Spielstand vorhanden – nichts zu sichern."),
-        _ => bail!("Der Live-Spielstand gehört nicht zum aktiven Profil – Sicherung verweigert (Schutz vor Überschreiben)."),
+        LiveStatus::Missing => bail!("No live save present – nothing to save."),
+        _ => bail!("The live save does not belong to the active profile – save refused (overwrite protection)."),
     }
-    let prof = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Aktives Profil fehlt."))?;
+    let prof = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Active profile is missing."))?;
     let mut snap = p.snapshots(&id).join(now_stamp());
     let mut n = 1;
     while snap.exists() {
@@ -524,7 +522,7 @@ pub fn sync_active(p: &Paths, st: &State) -> Result<String> {
 /// Foreign live data (belonging to no profile) is parked in backups/_unassigned, never deleted.
 pub fn switch_to(p: &Paths, st: &mut State, target: &str) -> Result<()> {
     let profiles = load_profiles(p);
-    let tgt = profiles.iter().find(|x| x.id == target).ok_or_else(|| anyhow!("Profil nicht gefunden."))?.clone();
+    let tgt = profiles.iter().find(|x| x.id == target).ok_or_else(|| anyhow!("Profile not found."))?.clone();
     let stamp = now_stamp();
 
     // 1. Put the live data where it belongs.
@@ -589,9 +587,9 @@ pub fn switch_to(p: &Paths, st: &mut State, target: &str) -> Result<()> {
 pub fn restore_snapshot(p: &Paths, st: &State, id: &str, snap: &str) -> Result<()> {
     let snap_dir = p.snapshots(id).join(snap);
     if !snap_dir.join("save00").exists() {
-        bail!("Snapshot enthält kein save00.");
+        bail!("Snapshot contains no save00.");
     }
-    let safety = p.snapshots(id).join(format!("{}_vor-Wiederherstellung", now_stamp()));
+    let safety = p.snapshots(id).join(format!("{}_before-restore", now_stamp()));
     replace_dir(&snap_dir.join("save00"), &p.profile_save(id), Some(&safety.join("save00")))?;
     if snap_dir.join("ew_save_state").exists() {
         replace_dir(&snap_dir.join("ew_save_state"), &p.profile_ew(id), Some(&safety.join("ew_save_state")))?;
@@ -611,13 +609,13 @@ pub fn restore_snapshot(p: &Paths, st: &State, id: &str, snap: &str) -> Result<(
 }
 
 pub fn duplicate_profile(p: &Paths, st: &State, id: &str) -> Result<Profile> {
-    let src = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Profil nicht gefunden."))?;
+    let src = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Profile not found."))?;
     if st.active.as_deref() == Some(id) && live_status(p) == LiveStatus::Owned(id.to_string()) {
         sync_active(p, st)?;
     }
     let new = Profile {
         id: new_id(p),
-        name: format!("{} (Kopie)", src.name),
+        name: format!("{} (copy)", src.name),
         protected: false,
         created: now_human(),
         last_used: None,
@@ -635,12 +633,12 @@ pub fn duplicate_profile(p: &Paths, st: &State, id: &str) -> Result<Profile> {
 
 /// Deleting only moves the profile into backups/_deleted.
 pub fn delete_profile(p: &Paths, st: &State, id: &str) -> Result<()> {
-    let prof = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Profil nicht gefunden."))?;
+    let prof = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Profile not found."))?;
     if prof.protected {
-        bail!("Profil ist geschützt. Erst den Schutz entfernen.");
+        bail!("Profile is protected. Remove the protection first.");
     }
     if st.active.as_deref() == Some(id) {
-        bail!("Das aktive Profil kann nicht gelöscht werden. Erst ein anderes aktivieren.");
+        bail!("The active profile cannot be deleted. Activate another one first.");
     }
     move_dir(&p.profile_dir(id), &p.backups().join("_deleted").join(format!("{id}_{}", now_stamp())))
 }

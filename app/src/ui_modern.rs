@@ -1,4 +1,4 @@
-//! The "Modern" layout. Same actions as Classic, different presentation.
+//! The main window layout.
 
 use super::*;
 use crate::theme::*;
@@ -53,7 +53,7 @@ impl App {
             ui.label(tracked("Noita", 17.0, INK, 3.5));
             ui.label(tracked("Save Selector", 17.0, INK_MUTED, 3.5));
             ui.add_space(18.0);
-            for (v, label) in [(View::Profiles, "Profile"), (View::Logs, "Logs")] {
+            for (v, label) in [(View::Profiles, "Profiles"), (View::Logs, "Logs")] {
                 let on = self.view == v;
                 let text = tracked(label, 12.0, if on { INK } else { INK_MUTED }, 1.6);
                 if ui.add(egui::SelectableLabel::new(on, text)).clicked() {
@@ -61,16 +61,13 @@ impl App {
                 }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Einstellungen").clicked() {
+                if ui.button("Settings").clicked() {
                     self.dialog = Some(Dialog::Settings(self.state.settings.clone()));
-                }
-                if ui.button("Classic").on_hover_text("Zum ursprünglichen, schlichten Design wechseln").clicked() {
-                    self.set_theme(UiTheme::Classic);
                 }
                 if let Some(r) = &self.update
                     && ui
                         .button(RichText::new(format!("Update {}", r.version)).color(ALIVE))
-                        .on_hover_text(format!("Installiert: {}", update::VERSION))
+                        .on_hover_text(format!("Installed: {}", update::VERSION))
                         .clicked()
                 {
                     self.dialog = Some(Dialog::Update(r.clone()));
@@ -84,46 +81,46 @@ impl App {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 if self.game_running() {
-                    status(ui, "Spiel", &format!("läuft ({})", self.running.join(", ")), WARN);
+                    status(ui, "Game", &format!("running ({})", self.running.join(", ")), WARN);
                 } else {
-                    status(ui, "Spiel", "geschlossen", ALIVE);
+                    status(ui, "Game", "closed", ALIVE);
                 }
                 ui.add_space(14.0);
-                status(ui, "Steam", if self.steam_on { "läuft" } else { "aus" }, if self.steam_on { STEAM } else { INK_MUTED });
-                let label = if self.steam_on { "Schließen" } else { "Starten" };
-                if ui.small_button(label).on_hover_text("Steam sauber beenden bzw. starten").clicked() {
+                status(ui, "Steam", if self.steam_on { "running" } else { "off" }, if self.steam_on { STEAM } else { INK_MUTED });
+                let label = if self.steam_on { "Close" } else { "Start" };
+                if ui.small_button(label).on_hover_text("Close or start Steam cleanly").clicked() {
                     self.toggle_steam();
                 }
                 ui.add_space(14.0);
                 match self.cloud {
-                    Some(false) => status(ui, "Cloud", "aus", ALIVE),
+                    Some(false) => status(ui, "Cloud", "off", ALIVE),
                     Some(true) => {
-                        status(ui, "Cloud", "AN", DANGER);
-                        ui.label(RichText::new("ausschalten?").color(DANGER).underline()).on_hover_text(
-                            "Steam Cloud kann beim Profilwechsel Konflikte melden oder Saves überschreiben.\n\
-                             Steam > Bibliothek > Noita > Eigenschaften > Allgemein >\n\
-                             'Spielstände in der Steam Cloud speichern' deaktivieren.",
+                        status(ui, "Cloud", "ON", DANGER);
+                        ui.label(RichText::new("turn off?").color(DANGER).underline()).on_hover_text(
+                            "Steam Cloud may report conflicts or overwrite saves when switching profiles.\n\
+                             Steam > Library > Noita > Properties > General >\n\
+                             untick 'Keep game saves in the Steam Cloud'.",
                         );
                     }
-                    None => status(ui, "Cloud", "unbekannt", INK_MUTED),
+                    None => status(ui, "Cloud", "unknown", INK_MUTED),
                 }
                 ui.add_space(14.0);
                 let (text, color) = match &self.live {
                     LiveStatus::Owned(id) => match self.profiles.iter().find(|p| &p.id == id) {
                         Some(p) => (p.name.clone(), kind_color(p.kind)),
-                        None => ("(gelöschtes Profil)".into(), WARN),
+                        None => ("(deleted profile)".into(), WARN),
                     },
-                    LiveStatus::Missing => ("nichts – Noita startet neu".into(), INK_MUTED),
-                    LiveStatus::Foreign => ("unbekannter Spielstand".into(), WARN),
+                    LiveStatus::Missing => ("nothing – Noita starts fresh".into(), INK_MUTED),
+                    LiveStatus::Foreign => ("unknown save".into(), WARN),
                 };
-                status(ui, "Im Spiel", &text, color);
+                status(ui, "In game", &text, color);
                 if let Some((net, color)) = self.net_status() {
                     ui.add_space(14.0);
-                    status(ui, "Netz", &net, color);
+                    status(ui, "Network", &net, color);
                 }
                 if self.proxy_orphaned() {
                     ui.add_space(8.0);
-                    if ui.small_button("Proxy beenden").on_hover_text("Noita ist zu, der EW Proxy läuft noch (z.B. im IP-Modus ohne Fenster)").clicked() {
+                    if ui.small_button("Stop proxy").on_hover_text("Noita is closed but the EW proxy is still running (e.g. windowless IP mode)").clicked() {
                         self.stop_proxy();
                     }
                 }
@@ -140,14 +137,14 @@ impl App {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new("Der aktuelle Noita-Spielstand gehört zu keinem Profil.").color(WARN));
-                        if ui.button("Als Profil übernehmen").clicked() {
+                        ui.label(RichText::new("The current Noita save belongs to no profile.").color(WARN));
+                        if ui.button("Import as profile").clicked() {
                             self.open_import_dialog();
                         }
                         if let Some(name) = self.active_name() {
                             if ui
-                                .button(format!("Gehört zu \"{name}\""))
-                                .on_hover_text("Nur wählen, wenn das sicher der Spielstand dieses Profils ist\n(z.B. nach einem neuen Run, wenn die Markierung fehlt).")
+                                .button(format!("Belongs to \"{name}\""))
+                                .on_hover_text("Only choose this if it is definitely this profile's save\n(e.g. after a new run when the marker is missing).")
                                 .clicked()
                             {
                                 self.claim_live(&name);
@@ -162,7 +159,7 @@ impl App {
 
     fn m_log(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            caption(ui, "Protokoll", INK_MUTED);
+            caption(ui, "Log", INK_MUTED);
             if let Some((label, _)) = &self.busy {
                 ui.add_space(8.0);
                 ui.add(egui::Spinner::new().size(12.0).color(INK_2));
@@ -172,10 +169,10 @@ impl App {
         egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             if self.log.is_empty() {
-                ui.label(RichText::new("Noch nichts passiert.").monospace().size(11.5).color(INK_MUTED));
+                ui.label(RichText::new("Nothing happened yet.").monospace().size(11.5).color(INK_MUTED));
             }
             for l in &self.log {
-                let color = if l.contains("FEHLER") { DANGER } else { INK_MUTED };
+                let color = if l.contains("ERROR") { DANGER } else { INK_MUTED };
                 ui.label(RichText::new(l).monospace().size(11.5).color(color));
             }
         });
@@ -186,10 +183,10 @@ impl App {
     fn m_list(&mut self, ui: &mut Ui) {
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             ui.add_space(2.0);
-            if ui.add_sized([ui.available_width(), 32.0], egui::Button::new("+  Neues Profil")).clicked() {
+            if ui.add_sized([ui.available_width(), 32.0], egui::Button::new("+  New profile")).clicked() {
                 self.dialog = Some(Dialog::New { name: String::new(), kind: Kind::Singleplayer, keep_progress: true });
             }
-            if self.live == LiveStatus::Foreign && ui.add_sized([ui.available_width(), 28.0], egui::Button::new("Aktuellen Save übernehmen")).clicked() {
+            if self.live == LiveStatus::Foreign && ui.add_sized([ui.available_width(), 28.0], egui::Button::new("Import current save")).clicked() {
                 self.open_import_dialog();
             }
             ui.add_space(6.0);
@@ -198,8 +195,8 @@ impl App {
                     let profiles = self.profiles.clone();
                     if profiles.is_empty() {
                         ui.add_space(24.0);
-                        ui.label(RichText::new("Noch keine Profile.").color(INK_2));
-                        ui.label(RichText::new("Übernimm deinen aktuellen Spielstand oder lege ein neues Profil an.").small().color(INK_MUTED));
+                        ui.label(RichText::new("No profiles yet.").color(INK_2));
+                        ui.label(RichText::new("Import your current save or create a new profile.").small().color(INK_MUTED));
                         return;
                     }
                     let mut new_hover = None;
@@ -256,18 +253,18 @@ impl App {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.0;
                     ui.add(egui::Label::new(RichText::new(&p.name).size(14.5).strong().color(if active { ALIVE } else { INK })).truncate());
-                    let last = p.last_used.clone().unwrap_or_else(|| "nie".into());
-                    ui.add(egui::Label::new(RichText::new(format!("zuletzt {last}")).small().color(INK_MUTED)).truncate());
+                    let last = p.last_used.clone().unwrap_or_else(|| "never".into());
+                    ui.add(egui::Label::new(RichText::new(format!("last used {last}")).small().color(INK_MUTED)).truncate());
                 });
             });
             if active || p.protected {
                 ui.horizontal(|ui| {
                     ui.add_space(42.0);
                     if active {
-                        tag(ui, "Aktiv", ALIVE);
+                        tag(ui, "Active", ALIVE);
                     }
                     if p.protected {
-                        tag(ui, "Geschützt", WARD);
+                        tag(ui, "Protected", WARD);
                     }
                 });
             }
@@ -286,8 +283,8 @@ impl App {
         let Some(mut p) = self.edit.clone() else {
             ui.add_space(60.0);
             ui.vertical_centered(|ui| {
-                ui.label(tracked("Kein Profil ausgewählt", 13.0, INK_2, 2.0));
-                ui.label(RichText::new("Links ein Profil wählen.").color(INK_MUTED));
+                ui.label(tracked("No profile selected", 13.0, INK_2, 2.0));
+                ui.label(RichText::new("Pick a profile on the left.").color(INK_MUTED));
             });
             return;
         };
@@ -309,13 +306,13 @@ impl App {
                     ui.label(RichText::new(&p.name).size(24.0).strong().color(INK));
                     ui.horizontal(|ui| {
                         if active {
-                            tag(ui, "Aktiv", ALIVE);
+                            tag(ui, "Active", ALIVE);
                         }
                         if self.live == LiveStatus::Owned(p.id.clone()) {
-                            tag(ui, "Im Spiel geladen", INK_2);
+                            tag(ui, "Loaded in game", INK_2);
                         }
                         if p.protected {
-                            tag(ui, "Geschützt", WARD);
+                            tag(ui, "Protected", WARD);
                         }
                     });
                 });
@@ -325,25 +322,25 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 if active {
                     let label = match p.kind {
-                        Kind::EntangledWorlds => "Spielen  ·  EW Proxy",
-                        Kind::NoitaTogether => "Spielen  ·  Noita Together",
-                        Kind::Singleplayer => "Spielen",
+                        Kind::EntangledWorlds => "Play  ·  EW proxy",
+                        Kind::NoitaTogether => "Play  ·  Noita Together",
+                        Kind::Singleplayer => "Play",
                     };
                     if cta(ui, label, color, !locked).clicked() {
                         self.play(p.kind);
                     }
                     if ui
-                        .add_enabled(!locked, egui::Button::new("Jetzt sichern").min_size(vec2(0.0, 32.0)))
-                        .on_hover_text("Live-Spielstand ins Profil kopieren (alte Kopie wird Snapshot)")
+                        .add_enabled(!locked, egui::Button::new("Save now").min_size(vec2(0.0, 32.0)))
+                        .on_hover_text("Copy the live save into the profile (the old copy becomes a snapshot)")
                         .clicked()
                     {
                         self.sync_now();
                     }
                 } else {
-                    if cta(ui, "Aktivieren & Spielen", color, !locked).clicked() {
+                    if cta(ui, "Activate & play", color, !locked).clicked() {
                         self.activate(p.id.clone(), true);
                     }
-                    if ui.add_enabled(!locked, egui::Button::new("Nur aktivieren").min_size(vec2(0.0, 32.0))).clicked() {
+                    if ui.add_enabled(!locked, egui::Button::new("Activate only").min_size(vec2(0.0, 32.0))).clicked() {
                         self.activate(p.id.clone(), false);
                     }
                 }
@@ -352,7 +349,7 @@ impl App {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     dot(ui, WARN);
-                    ui.label(RichText::new("Wechseln und Sichern geht erst, wenn Noita, EW-Proxy und Noita Together geschlossen sind.").color(WARN));
+                    ui.label(RichText::new("Switching and saving only work once Noita, the EW proxy and Noita Together are closed.").color(WARN));
                 });
             }
         });
@@ -379,15 +376,15 @@ impl App {
         ui.add_space(12.0);
 
         ui.horizontal(|ui| {
-            if ui.button("Ordner öffnen").clicked() {
+            if ui.button("Open folder").clicked() {
                 sys::open_folder(&self.paths.profile_dir(&p.id));
             }
-            if ui.add_enabled(!locked, egui::Button::new("Duplizieren")).clicked() {
+            if ui.add_enabled(!locked, egui::Button::new("Duplicate")).clicked() {
                 self.duplicate(p.id.clone());
             }
             if ui
-                .add_enabled(!locked && !p.protected && !active, danger_button("Löschen"))
-                .on_disabled_hover_text("Geschützte oder aktive Profile können nicht gelöscht werden")
+                .add_enabled(!locked && !p.protected && !active, danger_button("Delete"))
+                .on_disabled_hover_text("Protected or active profiles cannot be deleted")
                 .clicked()
             {
                 self.dialog = Some(Dialog::ConfirmDelete(p.id.clone()));
@@ -405,24 +402,24 @@ impl App {
         let mut action = EditAction::None;
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            caption(ui, "Profil", INK_MUTED);
+            caption(ui, "Profile", INK_MUTED);
             ui.add_space(6.0);
             egui::Grid::new("m_meta").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
                 caption(ui, "Name", INK_2);
                 ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(f32::INFINITY));
                 ui.end_row();
-                caption(ui, "Typ", INK_2);
+                caption(ui, "Type", INK_2);
                 egui::ComboBox::from_id_salt("m_kind").width(180.0).selected_text(RichText::new(p.kind.label()).color(INK)).show_ui(ui, |ui| {
                     for k in Kind::ALL {
                         ui.selectable_value(&mut p.kind, k, k.label());
                     }
                 });
                 ui.end_row();
-                caption(ui, "Schutz", INK_2);
-                ui.checkbox(&mut p.protected, "nicht löschbar");
+                caption(ui, "Protection", INK_2);
+                ui.checkbox(&mut p.protected, "cannot be deleted");
                 ui.end_row();
-                caption(ui, "Notiz", INK_2);
-                ui.add(egui::TextEdit::multiline(&mut p.note).desired_rows(2).desired_width(f32::INFINITY).hint_text("Mit wem, welcher Seed, wie weit …"));
+                caption(ui, "Note", INK_2);
+                ui.add(egui::TextEdit::multiline(&mut p.note).desired_rows(2).desired_width(f32::INFINITY).hint_text("Who with, which seed, how far …"));
                 ui.end_row();
             });
             let stored = self.profiles.iter().find(|x| x.id == p.id);
@@ -430,12 +427,12 @@ impl App {
             if changed {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    tag(ui, "Ungespeichert", WARN);
+                    tag(ui, "Unsaved", WARN);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Verwerfen").clicked() {
+                        if ui.button("Discard").clicked() {
                             action = EditAction::Discard;
                         }
-                        if ui.button(RichText::new("Speichern").strong()).clicked() {
+                        if ui.button(RichText::new("Save").strong()).clicked() {
                             action = EditAction::Save;
                         }
                     });
@@ -448,25 +445,25 @@ impl App {
     fn m_save_section(&self, ui: &mut Ui, p: &Profile) {
         card().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            caption(ui, "Spielstand", INK_MUTED);
+            caption(ui, "Save", INK_MUTED);
             ui.add_space(6.0);
             egui::Grid::new("m_facts").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
                 let mono = |t: String| RichText::new(t).monospace().color(INK);
-                caption(ui, "Erstellt", INK_2);
+                caption(ui, "Created", INK_2);
                 ui.label(mono(p.created.clone()));
                 ui.end_row();
-                caption(ui, "Aktiviert", INK_2);
+                caption(ui, "Activated", INK_2);
                 ui.label(mono(p.last_used.clone().unwrap_or_else(|| "–".into())));
                 ui.end_row();
-                caption(ui, "Kopie", INK_2);
-                ui.label(mono(format!("{:.1} MB  ·  {} Dateien", self.sel_info.1 as f64 / 1_048_576.0, self.sel_info.0)));
+                caption(ui, "Copy", INK_2);
+                ui.label(mono(format!("{:.1} MB  ·  {} files", self.sel_info.1 as f64 / 1_048_576.0, self.sel_info.0)));
                 ui.end_row();
                 if p.kind == Kind::EntangledWorlds {
-                    caption(ui, "EW-Run", INK_2);
+                    caption(ui, "EW run", INK_2);
                     if self.sel_info.2 {
-                        ui.label(RichText::new("save_state gesichert – Run geht weiter").color(ALIVE));
+                        ui.label(RichText::new("save_state stored – run continues").color(ALIVE));
                     } else {
-                        ui.label(RichText::new("kein save_state – neuer EW-Run").color(INK_2));
+                        ui.label(RichText::new("no save_state – new EW run").color(INK_2));
                     }
                     ui.end_row();
                 }
@@ -481,7 +478,7 @@ impl App {
             ui.horizontal(|ui| {
                 caption(ui, &format!("Snapshots  {}", snaps.len()), INK_MUTED);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.small_button("Ordner öffnen").clicked() {
+                    if ui.small_button("Open folder").clicked() {
                         let d = self.paths.snapshots(&p.id);
                         let _ = std::fs::create_dir_all(&d);
                         sys::open_folder(&d);
@@ -490,7 +487,7 @@ impl App {
             });
             ui.add_space(4.0);
             if snaps.is_empty() {
-                ui.label(RichText::new("Noch keine. Vor jedem Sichern wird die alte Kopie hier aufbewahrt.").color(INK_MUTED));
+                ui.label(RichText::new("None yet. Before every save the old copy is kept here.").color(INK_MUTED));
                 return;
             }
             egui::ScrollArea::vertical().max_height(170.0).auto_shrink([false, true]).show(ui, |ui| {
@@ -498,10 +495,10 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(pretty_stamp(s)).monospace().color(if i == 0 { INK } else { INK_2 }));
                         if i == 0 {
-                            tag(ui, "Neuester", INK_2);
+                            tag(ui, "Newest", INK_2);
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.add_enabled(!locked, egui::Button::new("Wiederherstellen").small()).clicked() {
+                            if ui.add_enabled(!locked, egui::Button::new("Restore").small()).clicked() {
                                 self.dialog = Some(Dialog::ConfirmRestore(p.id.clone(), s.clone()));
                             }
                         });
