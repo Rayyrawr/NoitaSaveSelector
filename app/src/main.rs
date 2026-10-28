@@ -36,6 +36,9 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
     update::cleanup();
+    if args.iter().any(|a| a == "--updated") {
+        sys::refresh_shell_icons();
+    }
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

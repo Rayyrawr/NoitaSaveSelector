@@ -212,3 +212,13 @@ pub fn start_uninstall() -> Result<()> {
     }
     Ok(())
 }
+
+/// Tell Explorer that icons changed. Without it, desktop shortcuts keep showing the old exe icon
+/// after a self-update until Windows rebuilds its icon cache.
+pub fn refresh_shell_icons() {
+    use windows_sys::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
+    // SAFETY: documented no-argument notification.
+    unsafe {
+        SHChangeNotify(SHCNE_ASSOCCHANGED as _, SHCNF_IDLIST, std::ptr::null(), std::ptr::null());
+    }
+}

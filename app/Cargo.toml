@@ -1,6 +1,6 @@
 [package]
 name = "noita_save_selector"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2024"
 description = "Profile manager for Noita saves (Singleplayer, Noita Together, Entangled Worlds)"
 license = "MIT"
@@ -19,7 +19,7 @@ serde_json = "1.0.154"
 sha2 = "0.10"
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 ureq = "2"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_UI_Shell"] }
 winreg = "0.52"
 
 [build-dependencies]

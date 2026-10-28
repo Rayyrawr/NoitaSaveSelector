@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.1.2 – 2026-10-28
+- After a self-update the app tells Windows to refresh icons, so desktop shortcuts show the new icon right away
+
 ## 1.1.1 – 2026-10-28
 - Settings no longer jitter when the window is small: dialogs have a fixed width, the settings body scrolls and Save/Cancel stay visible
 - Settings are grouped into Programs, Behavior, About and Uninstall
