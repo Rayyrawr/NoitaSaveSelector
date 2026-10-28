@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 – 2026-10-28
+- Shared progress: unlocked spells, perks and enemies (Noita's Progress screen) are no longer stuck in the profile they were made in. Settings → Progress: shared by all profiles (default), singleplayer and multiplayer separate, or per profile
+- The runs themselves stay separate; progress is only ever added (new unlocks are copied, enemy counters take the higher value)
+- On the first start (and after changing the mode) the existing profiles are merged once the game is closed; each profile's previous progress is backed up in `backups\_progress`
+- Restoring a snapshot keeps the progress made since
+
 ## 1.2.1 – 2026-10-28
 - "Keep progress" on a new profile now also carries over the enemies in Noita's Progress screen (stats/), not only the unlocked spells and perks. Before, every new profile started with an empty enemy list
 

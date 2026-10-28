@@ -2,6 +2,7 @@
 
 mod detect;
 mod ewlog;
+mod progress;
 mod saves;
 mod sys;
 mod theme;
@@ -128,6 +129,8 @@ struct App {
     update_rx: Option<(Receiver<Result<Option<update::Release>>>, bool)>,
     /// A run started directly in Noita sits under the active profile's marker.
     other_run: bool,
+    /// Progress mode a merge was last started for (no retry loop when it fails).
+    progress_tried: Option<progress::ProgressMode>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -169,6 +172,7 @@ impl App {
             update: None,
             update_rx: None,
             other_run: false,
+            progress_tried: None,
         };
         app.info(format!("Version {} – data: {}", update::VERSION, app.paths.root.display()));
         if detect::needs_search(&app.state.settings) {
@@ -321,6 +325,16 @@ impl App {
             }
             self.reload();
         }
+    }
+
+    /// Merge progress once after the mode changed (or on the first start with this feature).
+    fn poll_progress(&mut self) {
+        let mode = self.state.settings.progress;
+        if self.state.progress_merged == Some(mode) || self.progress_tried == Some(mode) || self.busy.is_some() || self.game_running() {
+            return;
+        }
+        self.progress_tried = Some(mode);
+        self.job("Progress", true, saves::merge_progress);
     }
 
     fn poll_system(&mut self) {
@@ -616,10 +630,15 @@ impl App {
                         ui.text_edit_singleline(name);
                     });
                     kind_picker(ui, kind);
-                    ui.checkbox(keep_progress, "Keep progress (unlocked spells, perks and enemies)");
+                    let mode = self.state.settings.progress;
+                    if mode == progress::ProgressMode::PerProfile {
+                        ui.checkbox(keep_progress, "Keep progress (unlocked spells, perks and enemies)");
+                    } else {
+                        ui.label(RichText::new(format!("Progress: {} (see Settings)", mode.label().to_lowercase())).small().color(theme::INK_MUTED));
+                    }
                     ui.horizontal(|ui| {
                         if ui.button("Create").clicked() && !name.trim().is_empty() {
-                            let (n, k, kp) = (name.clone(), *kind, *keep_progress);
+                            let (n, k, kp) = (name.clone(), *kind, *keep_progress && mode == progress::ProgressMode::PerProfile);
                             self.job("Create", false, move |p, _| {
                                 let template = p.live_save.clone();
                                 let prof = saves::create_profile(p, &n, k, kp, template.exists().then_some(template.as_path()))?;
@@ -722,6 +741,27 @@ impl App {
                         ui.checkbox(&mut s.close_steam_for_singleplayer, "Singleplayer: close Steam first and start Noita without Steam");
                         ui.label(RichText::new("Entangled Worlds needs Steam (lobby/network) – Steam is started when needed.").small().color(theme::INK_MUTED));
                         ui.checkbox(&mut s.check_updates, "Check GitHub for updates at startup");
+
+                        ui.add_space(14.0);
+                        theme::caption(ui, "Progress", theme::INK_MUTED);
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Unlocked spells, perks and enemies (Noita's Progress screen). The runs themselves always stay in their profile.").small().color(theme::INK_MUTED));
+                        egui::ComboBox::from_id_salt("progress_mode")
+                            .width(300.0)
+                            .selected_text(s.progress.label())
+                            .show_ui(ui, |ui| {
+                                for m in progress::ProgressMode::ALL {
+                                    ui.selectable_value(&mut s.progress, m, m.label());
+                                }
+                            });
+                        ui.label(RichText::new(s.progress.hint()).small());
+                        if s.progress != self.state.settings.progress && s.progress != progress::ProgressMode::PerProfile {
+                            ui.label(
+                                RichText::new("On save, the progress of the affected profiles is merged once the game is closed. Merged progress can't be split again; each profile's previous progress is kept in backups\\_progress.")
+                                    .small()
+                                    .color(theme::WARN),
+                            );
+                        }
 
                         ui.add_space(14.0);
                         theme::caption(ui, "About", theme::INK_MUTED);
@@ -922,6 +962,7 @@ impl eframe::App for App {
         self.poll_job();
         self.poll_update();
         self.poll_system();
+        self.poll_progress();
         ctx.request_repaint_after(Duration::from_millis(if self.busy.is_some() { 100 } else { 1000 }));
 
         if !self.style_applied {

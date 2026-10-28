@@ -42,7 +42,16 @@ The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the
 | Noita save (+ mod list) | `%USERPROFILE%\AppData\LocalLow\Nolla_Games_Noita\save00` |
 | Entangled Worlds run (EW profiles only) | `%APPDATA%\quant\entangledworlds\data\save_state` |
 
-`save_shared` and the EW settings are left alone. Unlocks (`save00\persistent`) belong to each profile.
+`save_shared` and the EW settings are left alone.
+
+## Progress
+Noita's Progress screen (unlocked spells and perks in `save00\persistent`, enemies in `save00\stats`) can be shared between profiles. Settings → Progress:
+- **Shared by all profiles** (default): like Noita without the app – whatever you unlock in one profile shows up in all of them.
+- **Singleplayer and multiplayer separate**: singleplayer profiles share one progress, Noita Together and Entangled Worlds profiles another.
+- **Per profile**: each profile keeps the progress it was played with.
+
+The run itself (world, player, inventory) always stays in its profile. Shared progress lives in `progress\` in the data folder; saving a profile adds its progress there, activating a profile adds it from there. Nothing is ever taken away: unknown unlocks are copied, enemy counters take the higher value. Unlocks also decide which spells and perks can appear in parts of the world that are generated later, so a run continued with newer progress can find spells it couldn't before.
+When the mode changes, the existing profiles are merged once (with the game closed); each profile's previous progress is kept in `backups\_progress\`.
 
 ## Safety
 - The live folder carries a marker `.nss_profile`. Data is written back into a profile **only** when it matches. If the folder was replaced from outside (e.g. by Steam Cloud), the app refuses to save.

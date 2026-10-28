@@ -9,6 +9,8 @@
 //!   backups/_last_live/             the live save00 as it was right before the last switch
 //!   backups/_unassigned/<ts>/       live data that belonged to no profile and had to make room
 //!   backups/_deleted/<id>_<ts>/     deleted profiles
+//!   backups/_progress/<ts>/<id>/    each profile's progress before it was first merged into a pool
+//!   progress/<pool>/                progress shared between profiles (see progress.rs)
 //!
 //! The live save00 carries a marker file (.nss_profile) with the id of the profile it belongs to.
 //! Data is only ever written back into a profile when that marker matches.
@@ -17,6 +19,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::progress::{self, ProgressMode};
 
 pub const MARKER: &str = ".nss_profile";
 
@@ -82,6 +86,8 @@ pub struct Settings {
     pub ew_join: String,
     /// Ask GitHub for a newer version at startup.
     pub check_updates: bool,
+    /// Which profiles share their progress (unlocked spells, perks, enemies).
+    pub progress: ProgressMode,
 }
 
 impl Default for Settings {
@@ -99,6 +105,7 @@ impl Default for Settings {
             ew_port: 21251,
             ew_join: String::new(),
             check_updates: true,
+            progress: ProgressMode::Shared,
         }
     }
 }
@@ -108,6 +115,8 @@ impl Default for Settings {
 pub struct State {
     pub active: Option<String>,
     pub settings: Settings,
+    /// The progress mode all existing profiles were last merged for.
+    pub progress_merged: Option<ProgressMode>,
 }
 
 #[derive(Clone, Debug)]
@@ -175,7 +184,7 @@ fn data_root() -> PathBuf {
 /// mode the data folder is the exe's folder and may hold unrelated files. The live save00 keeps
 /// its content; only our marker is removed so a later install offers to import it again.
 pub fn delete_app_data(p: &Paths) -> Result<()> {
-    for d in ["profiles", "backups", "logs"] {
+    for d in ["profiles", "backups", "logs", "progress"] {
         let d = p.root.join(d);
         if d.exists() {
             fs::remove_dir_all(&d).with_context(|| format!("Delete: {}", d.display()))?;
@@ -500,6 +509,7 @@ pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected:
         if kind == Kind::EntangledWorlds && p.ew_state.exists() {
             copy_verified(&p.ew_state, &p.profile_ew(&id))?;
         }
+        progress::absorb(p, st.settings.progress, kind, &p.profile_save(&id))?;
         write_marker(p, &id)?;
         st.active = Some(id.clone());
         save_state(p, st)
@@ -513,6 +523,7 @@ pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected:
 
 /// New profile with a fresh run. Keeps the mod list from `template` and, with `keep_progress`,
 /// the unlocks (persistent/) and the enemy/kill stats behind Noita's Progress screen (stats/ without sessions/).
+/// Profiles in a progress pool get their progress from the pool when they are activated.
 pub fn create_profile(p: &Paths, name: &str, kind: Kind, keep_progress: bool, template: Option<&Path>) -> Result<Profile> {
     let id = new_id(p);
     let prof = Profile {
@@ -579,6 +590,7 @@ pub fn sync_active(p: &Paths, st: &State) -> Result<String> {
     if prof.kind == Kind::EntangledWorlds && p.ew_state.exists() {
         replace_dir(&p.ew_state, &p.profile_ew(&id), Some(&snap.join("ew_save_state")))?;
     }
+    progress::absorb(p, st.settings.progress, prof.kind, &p.profile_save(&id))?;
     rotate_snapshots(p, &id, st.settings.keep_snapshots);
     Ok(prof.name)
 }
@@ -627,8 +639,9 @@ pub fn switch_to(p: &Paths, st: &mut State, target: &str) -> Result<()> {
         }
     }
 
-    // 3. Install the target.
+    // 3. Install the target, with the progress the other profiles of its pool made meanwhile.
     let src = p.profile_save(&tgt.id);
+    progress::apply(p, st.settings.progress, tgt.kind, &src)?;
     if src.exists() {
         replace_dir(&src, &p.live_save, None)?;
     } else {
@@ -656,6 +669,10 @@ pub fn restore_snapshot(p: &Paths, st: &State, id: &str, snap: &str) -> Result<(
     }
     let safety = p.snapshots(id).join(format!("{}_before-restore", now_stamp()));
     replace_dir(&snap_dir.join("save00"), &p.profile_save(id), Some(&safety.join("save00")))?;
+    // Going back in a run does not take back what was unlocked since.
+    if let Some(prof) = load_profiles(p).into_iter().find(|x| x.id == id) {
+        progress::apply(p, st.settings.progress, prof.kind, &p.profile_save(id))?;
+    }
     if snap_dir.join("ew_save_state").exists() {
         replace_dir(&snap_dir.join("ew_save_state"), &p.profile_ew(id), Some(&safety.join("ew_save_state")))?;
     }
@@ -694,6 +711,42 @@ pub fn duplicate_profile(p: &Paths, st: &State, id: &str) -> Result<Profile> {
         copy_dir(&p.profile_ew(id), &p.profile_ew(&new.id))?;
     }
     Ok(new)
+}
+
+/// Bring all profiles (and the live save) in line with the progress mode: collect every profile's
+/// progress into its pool, then hand the pool back to every profile. Each profile's progress is
+/// backed up first, because merging can't be taken apart again. Needs the game to be closed.
+pub fn merge_progress(p: &Paths, st: &mut State) -> Result<String> {
+    let mode = st.settings.progress;
+    if mode != ProgressMode::PerProfile {
+        let profiles = load_profiles(p);
+        let live = match live_status(p) {
+            LiveStatus::Owned(o) => profiles.iter().find(|x| x.id == o).map(|x| x.kind),
+            _ => None,
+        };
+        let backup = p.backups().join("_progress").join(now_stamp());
+        for prof in &profiles {
+            progress::copy_progress(&p.profile_save(&prof.id), &backup.join(&prof.id))?;
+        }
+        if live.is_some() {
+            progress::copy_progress(&p.live_save, &backup.join("_live"))?;
+        }
+        for prof in &profiles {
+            progress::absorb(p, mode, prof.kind, &p.profile_save(&prof.id))?;
+        }
+        if let Some(kind) = live {
+            progress::absorb(p, mode, kind, &p.live_save)?;
+        }
+        for prof in &profiles {
+            progress::apply(p, mode, prof.kind, &p.profile_save(&prof.id))?;
+        }
+        if let Some(kind) = live {
+            progress::apply(p, mode, kind, &p.live_save)?;
+        }
+    }
+    st.progress_merged = Some(mode);
+    save_state(p, st)?;
+    Ok(format!("Progress: {}", mode.label().to_lowercase()))
 }
 
 /// Deleting only moves the profile into backups/_deleted.
@@ -807,6 +860,42 @@ mod tests {
     }
 
     #[test]
+    fn progress_follows_the_pool_but_runs_stay_apart() {
+        let e = env("pool");
+        let p = &e.p;
+        let mut st = State::default();
+        st.settings.progress = ProgressMode::SplitByType;
+        put(&p.live_save.join("player.xml"), "sp-run");
+        put(&p.live_save.join("persistent/flags/action_a"), "x");
+        let a = import_live(p, &mut st, "SP A", Kind::Singleplayer, false).unwrap();
+        let b = create_profile(p, "SP B", Kind::Singleplayer, false, None).unwrap();
+        let mp = create_profile(p, "EW", Kind::EntangledWorlds, false, None).unwrap();
+
+        // B and the multiplayer profile start empty; B gets A's unlock from the singleplayer pool.
+        switch_to(p, &mut st, &b.id).unwrap();
+        assert!(p.live_save.join("persistent/flags/action_a").exists());
+        assert!(!p.live_save.join("player.xml").exists(), "the run itself is not shared");
+        put(&p.live_save.join("persistent/flags/action_b"), "x");
+        put(&p.live_save.join("stats/stats_bat.xml"), "<Stats kills=\"3\" >\n</Stats>\n");
+
+        switch_to(p, &mut st, &mp.id).unwrap();
+        assert!(!p.live_save.join("persistent/flags/action_a").exists(), "multiplayer keeps its own progress");
+
+        // Back to A: it has B's unlock and enemy now, and still its own run.
+        switch_to(p, &mut st, &a.id).unwrap();
+        assert_eq!(read(&p.live_save.join("player.xml")), "sp-run");
+        assert!(p.live_save.join("persistent/flags/action_b").exists());
+        assert!(p.live_save.join("stats/stats_bat.xml").exists());
+
+        // Switching to shared hands the singleplayer progress to the multiplayer profile too.
+        st.settings.progress = ProgressMode::Shared;
+        merge_progress(p, &mut st).unwrap();
+        assert!(p.profile_save(&mp.id).join("persistent/flags/action_b").exists());
+        assert_eq!(st.progress_merged, Some(ProgressMode::Shared));
+        assert_eq!(fs::read_dir(p.backups().join("_progress")).unwrap().count(), 1);
+    }
+
+    #[test]
     fn foreign_live_is_never_written_into_a_profile() {
         let e = env("foreign");
         let p = &e.p;
@@ -879,6 +968,26 @@ mod tests {
 
     /// Run manually against a COPY of real data: set NSS_ROOT / NSS_LIVE_SAVE / NSS_EW_STATE, then
     /// `cargo test --release -- --ignored real_data`.
+    /// Shared progress on a sandbox copy of real profiles (NSS_ROOT + NSS_LIVE_SAVE).
+    #[test]
+    #[ignore]
+    fn real_data_merge_progress() {
+        let p = Paths::detect();
+        assert!(std::env::var_os("NSS_LIVE_SAVE").is_some(), "only run against a sandbox copy");
+        let count = |d: &Path| (fs::read_dir(d.join("persistent/flags")).map(|r| r.count()).unwrap_or(0), fs::read_dir(d.join("stats")).map(|r| r.count()).unwrap_or(0));
+        let mut st = load_state(&p);
+        for prof in load_profiles(&p) {
+            eprintln!("before {}: {:?}", prof.name, count(&p.profile_save(&prof.id)));
+        }
+        eprintln!("before live: {:?}", count(&p.live_save));
+        st.settings.progress = ProgressMode::Shared;
+        merge_progress(&p, &mut st).unwrap();
+        for prof in load_profiles(&p) {
+            eprintln!("after  {}: {:?}", prof.name, count(&p.profile_save(&prof.id)));
+        }
+        eprintln!("after  live: {:?}", count(&p.live_save));
+    }
+
     #[test]
     #[ignore]
     fn real_data_roundtrip() {
