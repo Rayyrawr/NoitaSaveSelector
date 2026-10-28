@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.2.1 – 2026-10-28
+- "Keep progress" on a new profile now also carries over the enemies in Noita's Progress screen (stats/), not only the unlocked spells and perks. Before, every new profile started with an empty enemy list
+
 ## 1.2.0 – 2026-10-28
 - New "Import current run" button: a run started directly in Noita (e.g. a daily) becomes its own profile; the previously active profile keeps its run
 - The app now recognizes which run a save holds. If Noita holds a different run than the active profile, it no longer saves automatically, and switching or "Save now" ask first (import as new profile, or overwrite the profile)

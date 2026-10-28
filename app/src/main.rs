@@ -616,7 +616,7 @@ impl App {
                         ui.text_edit_singleline(name);
                     });
                     kind_picker(ui, kind);
-                    ui.checkbox(keep_progress, "Keep unlocks (persistent/)");
+                    ui.checkbox(keep_progress, "Keep progress (unlocked spells, perks and enemies)");
                     ui.horizontal(|ui| {
                         if ui.button("Create").clicked() && !name.trim().is_empty() {
                             let (n, k, kp) = (name.clone(), *kind, *keep_progress);

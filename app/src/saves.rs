@@ -511,7 +511,8 @@ pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected:
     Ok(prof)
 }
 
-/// New profile with a fresh run. Keeps unlocked progress (persistent/) and mod list from `template`.
+/// New profile with a fresh run. Keeps the mod list from `template` and, with `keep_progress`,
+/// the unlocks (persistent/) and the enemy/kill stats behind Noita's Progress screen (stats/ without sessions/).
 pub fn create_profile(p: &Paths, name: &str, kind: Kind, keep_progress: bool, template: Option<&Path>) -> Result<Profile> {
     let id = new_id(p);
     let prof = Profile {
@@ -536,8 +537,27 @@ pub fn create_profile(p: &Paths, name: &str, kind: Kind, keep_progress: bool, te
         if keep_progress && t.join("persistent").exists() {
             copy_dir(&t.join("persistent"), &save.join("persistent"))?;
         }
+        if keep_progress && t.join("stats").is_dir() {
+            copy_stats(&t.join("stats"), &save.join("stats"))?;
+        }
     }
     Ok(prof)
+}
+
+/// Long-term stats without the per-run session records (sessions/ belongs to the old runs).
+fn copy_stats(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for e in fs::read_dir(src)? {
+        let e = e?;
+        if e.file_type()?.is_dir() {
+            if e.file_name() != "sessions" {
+                copy_dir(&e.path(), &dst.join(e.file_name()))?;
+            }
+        } else {
+            fs::copy(e.path(), dst.join(e.file_name()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Copy the live save (and EW state) back into the active profile, keeping a snapshot of the old copy.
@@ -753,7 +773,14 @@ mod tests {
         // Play a bit more in EW, then switch to a new singleplayer profile.
         put(&p.live_save.join("player.xml"), "ew-player-v2");
         put(&p.ew_state.join("world_chunks.bit"), "ew-chunks-v2");
+        put(&p.live_save.join("persistent/flags/card_unlocked_x"), "1");
+        put(&p.live_save.join("stats/stats_ant.xml"), "kills");
+        put(&p.live_save.join("stats/sessions/20261025-020815_stats.xml"), "run");
         let sp = create_profile(p, "Solo", Kind::Singleplayer, true, Some(&p.live_save.clone())).unwrap();
+        // Unlocks and enemy progress carry over, the old run's records don't.
+        assert_eq!(read(&p.profile_save(&sp.id).join("persistent/flags/card_unlocked_x")), "1");
+        assert_eq!(read(&p.profile_save(&sp.id).join("stats/stats_ant.xml")), "kills");
+        assert!(!p.profile_save(&sp.id).join("stats/sessions").exists());
         switch_to(p, &mut st, &sp.id).unwrap();
         assert_eq!(live_status(p), LiveStatus::Owned(sp.id.clone()));
         assert!(!p.live_save.join("player.xml").exists());
