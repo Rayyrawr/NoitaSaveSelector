@@ -4,6 +4,8 @@ Profiles for Noita saves: Singleplayer, **Noita Together** and **Entangled World
 
 Windows, a single exe, no admin rights needed.
 
+![Profiles for Singleplayer, Noita Together and Entangled Worlds](docs/main.png)
+
 ## Install
 1. Download the latest `NoitaSaveSelector-Setup-x.y.z.exe` from [Releases](https://github.com/Rayyrawr/NoitaSaveSelector/releases) and run it.
 2. Pick a data folder (default `%LOCALAPPDATA%\NoitaSaveSelector`). Profiles, snapshots and logs live there.
@@ -34,7 +36,7 @@ The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the
 - When the game closes, the app saves into the active profile automatically (can be turned off).
 - *Import current run* stores whatever run is in Noita right now as its own profile, e.g. a daily or a new game you started directly in Noita. The profile that was active keeps its own run.
 - The app knows which run a save holds (Noita's run start time in `world_state.xml`). If Noita holds a different run than the active profile, nothing is saved automatically; a banner offers to import it as a new profile or to overwrite the profile on purpose.
-- *+ New profile* starts a fresh run. Mod list and unlocks are carried over, the multiplayer mods are switched on/off to match the type.
+- *+ New profile* starts a fresh run. The mod list is carried over (multiplayer mods are switched on/off to match the type) and you pick which progress it uses.
 
 ## What gets swapped?
 | | Location |
@@ -46,6 +48,9 @@ The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the
 
 ## Progress
 Noita's Progress screen (unlocked spells and perks in `save00\persistent`, enemies in `save00\stats`) can be shared between profiles. Settings → Progress:
+
+![Progress setting](docs/settings-progress.png)
+
 - **Shared by all profiles** (default): like Noita without the app – whatever you unlock in one profile shows up in all of them.
 - **Singleplayer and multiplayer separate**: singleplayer profiles share one progress, Noita Together and Entangled Worlds profiles another.
 - **Per profile**: each profile keeps the progress it was played with.
@@ -54,7 +59,11 @@ The run itself (world, player, inventory) always stays in its profile. Shared pr
 When the mode changes, the existing profiles are merged once (with the game closed); each profile's previous progress is kept in `backups\_progress\`.
 
 ### Progress sets
+![Each profile picks its progress](docs/progress.png)
+
 Like separate save slots: one set with everything unlocked, one for challenge runs that starts with nothing unlocked, and so on. Profile view → Progress → **Progress sets …** creates, renames and deletes them (a new set starts empty or as a copy of an existing progress). In the same place each profile picks what it uses: the default from the settings, a set, or its own progress. Profiles using the same set share their unlocks; activating a profile gives it exactly the set's progress, saving it adds what was unlocked. Changing a profile's progress backs up its previous progress in `backups\_progress\`.
+
+![Progress sets](docs/progress-sets.png)
 
 ## Safety
 - The live folder carries a marker `.nss_profile`. Data is written back into a profile **only** when it matches. If the folder was replaced from outside (e.g. by Steam Cloud), the app refuses to save.

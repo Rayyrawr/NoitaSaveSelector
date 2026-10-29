@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 – 2026-10-29
+- Settings: a missing arrow glyph in the progress hint showed as a box
+- README: screenshots
+
 ## 1.4.0 – 2026-10-29
 - Progress sets, like separate save slots: e.g. one with everything unlocked and one for challenge runs that starts with nothing unlocked. Make them under "Progress sets" in the profile view, empty or as a copy of an existing progress
 - Every profile can pick its progress: the default from the settings, a progress set, or its own. Switching backs up the profile's previous progress in `backups\_progress`; the run itself is not touched

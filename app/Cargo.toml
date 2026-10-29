@@ -1,6 +1,6 @@
 [package]
 name = "noita_save_selector"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2024"
 description = "Profile manager for Noita saves (Singleplayer, Noita Together, Entangled Worlds)"
 license = "MIT"

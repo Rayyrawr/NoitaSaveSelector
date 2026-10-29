@@ -926,7 +926,7 @@ impl App {
                                 }
                             });
                         ui.label(RichText::new(s.progress.hint()).small());
-                        ui.label(RichText::new("Single profiles can use their own progress or a progress set instead (profile view → Progress).").small().color(theme::INK_MUTED));
+                        ui.label(RichText::new("Single profiles can use their own progress or a progress set instead (Progress in the profile view).").small().color(theme::INK_MUTED));
                         if s.progress != self.state.settings.progress && s.progress != progress::ProgressMode::PerProfile {
                             ui.label(
                                 RichText::new("On save, the progress of the affected profiles is merged once the game is closed. Merged progress can't be split again; each profile's previous progress is kept in backups\\_progress.")

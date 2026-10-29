@@ -1242,7 +1242,7 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 
 [[package]]
 name = "noita_save_selector"
-version = "1.4.0"
+version = "1.4.1"
 dependencies = [
  "anyhow",
  "chrono",
