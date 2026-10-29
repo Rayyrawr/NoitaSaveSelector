@@ -53,6 +53,9 @@ Noita's Progress screen (unlocked spells and perks in `save00\persistent`, enemi
 The run itself (world, player, inventory) always stays in its profile. Shared progress lives in `progress\` in the data folder; saving a profile adds its progress there, activating a profile adds it from there. Nothing is ever taken away: unknown unlocks are copied, enemy counters take the higher value. Unlocks also decide which spells and perks can appear in parts of the world that are generated later, so a run continued with newer progress can find spells it couldn't before.
 When the mode changes, the existing profiles are merged once (with the game closed); each profile's previous progress is kept in `backups\_progress\`.
 
+### Progress sets
+Like separate save slots: one set with everything unlocked, one for challenge runs that starts with nothing unlocked, and so on. Profile view → Progress → **Progress sets …** creates, renames and deletes them (a new set starts empty or as a copy of an existing progress). In the same place each profile picks what it uses: the default from the settings, a set, or its own progress. Profiles using the same set share their unlocks; activating a profile gives it exactly the set's progress, saving it adds what was unlocked. Changing a profile's progress backs up its previous progress in `backups\_progress\`.
+
 ## Safety
 - The live folder carries a marker `.nss_profile`. Data is written back into a profile **only** when it matches. If the folder was replaced from outside (e.g. by Steam Cloud), the app refuses to save.
 - Before every save the previous profile copy is kept as a snapshot in `backups\<profile-id>\` (count configurable, default 8).

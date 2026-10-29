@@ -5,9 +5,11 @@
 //!   persistent/orbs_new/<n>       orbs found in any run
 //!   stats/stats_<enemy>.xml       kills and deaths per enemy
 //! Since the app swaps the whole save00, every profile would otherwise keep its own progress.
-//! A pool (progress/<pool>/, same layout) collects the progress of all profiles that share it:
-//! saving a profile merges its progress into the pool, activating one merges the pool into it.
-//! Merging only adds: unknown flags/orbs are copied, enemy counters take the higher value.
+//! A pool (progress/<pool>/, same layout) holds the progress of all profiles that use it:
+//! saving a profile merges its progress into the pool (only adds: unknown flags/orbs are copied,
+//! enemy counters take the higher value); activating one gives it exactly the pool's progress.
+//! Pools are "all", "singleplayer", "multiplayer" (from the progress mode) or a progress set the
+//! user made, like separate save slots: one with everything unlocked, one for challenge runs.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -48,7 +50,26 @@ impl ProgressMode {
     }
 }
 
-/// The pool a profile of `kind` uses, None when progress stays in the profile.
+/// Which progress a profile uses.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+pub enum ProgressChoice {
+    /// Whatever the progress mode in the settings says.
+    #[default]
+    Default,
+    /// A progress set (by id).
+    Set(String),
+    /// Only this profile's own progress.
+    Own,
+}
+
+/// A named pool made by the user.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct ProgressSet {
+    pub id: String,
+    pub name: String,
+}
+
+/// The pool a profile of `kind` uses by default, None when progress stays in the profile.
 pub fn pool(mode: ProgressMode, kind: Kind) -> Option<&'static str> {
     match mode {
         ProgressMode::Shared => Some("all"),
@@ -58,24 +79,70 @@ pub fn pool(mode: ProgressMode, kind: Kind) -> Option<&'static str> {
     }
 }
 
+/// Display name of a built-in pool.
+pub fn builtin_name(pool: &str) -> Option<&'static str> {
+    match pool {
+        "all" => Some("Shared by all profiles"),
+        "singleplayer" => Some("Singleplayer"),
+        "multiplayer" => Some("Multiplayer"),
+        _ => None,
+    }
+}
+
 pub fn pool_dir(p: &Paths, pool: &str) -> PathBuf {
     p.root.join("progress").join(pool)
 }
 
 /// Save -> pool.
-pub fn absorb(p: &Paths, mode: ProgressMode, kind: Kind, save: &Path) -> Result<()> {
-    match pool(mode, kind) {
+pub fn absorb(p: &Paths, pool: Option<&str>, save: &Path) -> Result<()> {
+    match pool {
         Some(name) => merge(save, &pool_dir(p, name)),
         None => Ok(()),
     }
 }
 
-/// Pool -> save.
-pub fn apply(p: &Paths, mode: ProgressMode, kind: Kind, save: &Path) -> Result<()> {
-    match pool(mode, kind) {
-        Some(name) if save.exists() => merge(&pool_dir(p, name), save),
-        _ => Ok(()),
+/// Pool -> save: the save gets exactly the pool's progress. A pool that doesn't exist yet is
+/// started from the save instead, so the first profile never loses what it has.
+pub fn apply(p: &Paths, pool: Option<&str>, save: &Path) -> Result<()> {
+    let Some(name) = pool else { return Ok(()) };
+    if !save.exists() {
+        return Ok(());
     }
+    let dir = pool_dir(p, name);
+    if dir.exists() { replace(&dir, save) } else { merge(save, &dir) }
+}
+
+/// (unlocks, enemies) in a pool or save.
+pub fn counts(dir: &Path) -> (usize, usize) {
+    let flags = files(&dir.join("persistent/flags")).len();
+    let enemies = files(&dir.join("stats")).iter().filter(|(n, _)| is_enemy_stats(n)).count();
+    (flags, enemies)
+}
+
+/// Make the progress files of `dst` an exact copy of those in `src`; the rest of `dst` stays.
+fn replace(src: &Path, dst: &Path) -> Result<()> {
+    for sub in ["persistent/flags", "persistent/orbs_new"] {
+        let target = dst.join(sub);
+        if target.exists() {
+            fs::remove_dir_all(&target).with_context(|| format!("Clear: {}", target.display()))?;
+        }
+        fs::create_dir_all(&target)?;
+        for (name, from) in files(&src.join(sub)) {
+            fs::copy(&from, target.join(name)).with_context(|| format!("Copy: {}", from.display()))?;
+        }
+    }
+    for (name, path) in files(&dst.join("stats")) {
+        if is_enemy_stats(&name) {
+            fs::remove_file(&path)?;
+        }
+    }
+    for (name, from) in files(&src.join("stats")) {
+        if is_enemy_stats(&name) {
+            fs::create_dir_all(dst.join("stats"))?;
+            fs::copy(&from, dst.join("stats").join(name))?;
+        }
+    }
+    Ok(())
 }
 
 /// Copy the progress files of `save` (persistent/, stats/stats_*.xml) to `dst`, for backups.

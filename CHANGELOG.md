@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 – 2026-10-29
+- Progress sets, like separate save slots: e.g. one with everything unlocked and one for challenge runs that starts with nothing unlocked. Make them under "Progress sets" in the profile view, empty or as a copy of an existing progress
+- Every profile can pick its progress: the default from the settings, a progress set, or its own. Switching backs up the profile's previous progress in `backups\_progress`; the run itself is not touched
+- New profiles can pick their progress right away
+- Activating a profile now gives it exactly the progress of its set/pool (before, progress was only added)
+
 ## 1.3.0 – 2026-10-28
 - Shared progress: unlocked spells, perks and enemies (Noita's Progress screen) are no longer stuck in the profile they were made in. Settings → Progress: shared by all profiles (default), singleplayer and multiplayer separate, or per profile
 - The runs themselves stay separate; progress is only ever added (new unlocks are copied, enemy counters take the higher value)

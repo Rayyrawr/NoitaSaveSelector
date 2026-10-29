@@ -203,7 +203,7 @@ impl App {
         ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
             ui.add_space(2.0);
             if ui.add_sized([ui.available_width(), 32.0], egui::Button::new("+  New profile")).clicked() {
-                self.dialog = Some(Dialog::New { name: String::new(), kind: Kind::Singleplayer, keep_progress: true });
+                self.dialog = Some(Dialog::New { name: String::new(), kind: Kind::Singleplayer, keep_progress: true, progress: ProgressChoice::Default });
             }
             if self.live != LiveStatus::Missing
                 && ui
@@ -400,6 +400,8 @@ impl App {
             self.m_save_section(ui, &p);
         }
         ui.add_space(12.0);
+        self.m_progress(ui, &p);
+        ui.add_space(12.0);
         self.m_snapshots(ui, &p, locked);
         ui.add_space(12.0);
 
@@ -496,6 +498,31 @@ impl App {
                     ui.end_row();
                 }
             });
+        });
+    }
+
+    fn m_progress(&mut self, ui: &mut Ui, p: &Profile) {
+        card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                caption(ui, "Progress", INK_MUTED);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.small_button("Progress sets …").clicked() {
+                        self.dialog = Some(Dialog::ProgressSets { new_name: String::new(), from: None, renaming: None, confirm_delete: None });
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let mut choice = p.progress.clone();
+                ui.add_enabled_ui(self.busy.is_none(), |ui| self.progress_picker(ui, "m_progress", &mut choice, p.kind));
+                let (flags, enemies) = self.sel_progress;
+                ui.label(RichText::new(format!("{flags} unlocks · {enemies} enemies")).color(INK_2));
+                if choice != p.progress {
+                    self.dialog = Some(Dialog::SetProgress { id: p.id.clone(), choice });
+                }
+            });
+            ui.label(RichText::new("Unlocked spells, perks and enemies. Profiles with the same progress share them; the run itself stays in the profile.").small().color(INK_MUTED));
         });
     }
 

@@ -12,6 +12,7 @@ mod update;
 
 use anyhow::{Result, bail};
 use eframe::egui::{self, Color32, RichText};
+use progress::ProgressChoice;
 use saves::{Kind, LiveStatus, Paths, Profile, Settings, State};
 use theme::kind_color;
 use std::sync::mpsc::{Receiver, channel};
@@ -85,7 +86,11 @@ enum Dialog {
     Import { name: String, kind: Kind, protected: bool },
     /// The live save is marked for the active profile but holds another run.
     NewRun { name: String, kind: Kind },
-    New { name: String, kind: Kind, keep_progress: bool },
+    New { name: String, kind: Kind, keep_progress: bool, progress: ProgressChoice },
+    /// Give a profile another progress.
+    SetProgress { id: String, choice: ProgressChoice },
+    /// Create, rename and delete progress sets.
+    ProgressSets { new_name: String, from: Option<String>, renaming: Option<(String, String)>, confirm_delete: Option<String> },
     ConfirmDelete(String),
     ConfirmRestore(String, String),
     ConfirmForeign { target: String, play: bool, ew_args: Vec<String> },
@@ -104,6 +109,8 @@ struct App {
     selected: Option<String>,
     edit: Option<Profile>,
     sel_info: (u64, u64, bool, Vec<String>),
+    /// (unlocks, enemies) of the selected profile's progress.
+    sel_progress: (usize, usize),
     procs: sys::Procs,
     last_poll: Instant,
     running: Vec<String>,
@@ -150,6 +157,7 @@ impl App {
             selected: None,
             edit: None,
             sel_info: (0, 0, false, vec![]),
+            sel_progress: (0, 0),
             procs: sys::Procs::new(),
             last_poll: Instant::now() - Duration::from_secs(10),
             running: vec![],
@@ -211,6 +219,13 @@ impl App {
             let (files, bytes) = saves::dir_stats(&self.paths.profile_save(&p.id));
             let ew = self.paths.profile_ew(&p.id).exists();
             self.sel_info = (files, bytes, ew, saves::list_snapshots(&self.paths, &p.id));
+            let live = self.live == LiveStatus::Owned(p.id.clone());
+            self.sel_progress = match saves::pool_of(&self.state, p) {
+                // The pool doesn't have what the running game added since the last save.
+                Some(pool) if progress::pool_dir(&self.paths, &pool).exists() && !live => progress::counts(&progress::pool_dir(&self.paths, &pool)),
+                _ if live => progress::counts(&self.paths.live_save),
+                _ => progress::counts(&self.paths.profile_save(&p.id)),
+            };
         }
         self.refresh_logs();
     }
@@ -454,6 +469,29 @@ impl App {
         self.reload();
     }
 
+    /// How a progress choice reads for a profile of `kind`.
+    fn choice_label(&self, choice: &ProgressChoice, kind: Kind) -> String {
+        match choice {
+            ProgressChoice::Own => "Own (only this profile)".into(),
+            ProgressChoice::Set(id) if self.state.progress_sets.iter().any(|s| &s.id == id) => saves::pool_name(&self.state, id),
+            _ => match progress::pool(self.state.settings.progress, kind) {
+                Some(pool) => format!("Default: {}", saves::pool_name(&self.state, pool)),
+                None => "Default: own progress".into(),
+            },
+        }
+    }
+
+    /// Dropdown with every progress a profile can use.
+    fn progress_picker(&self, ui: &mut egui::Ui, salt: &str, choice: &mut ProgressChoice, kind: Kind) {
+        egui::ComboBox::from_id_salt(salt).width(260.0).selected_text(self.choice_label(choice, kind)).show_ui(ui, |ui| {
+            ui.selectable_value(choice, ProgressChoice::Default, self.choice_label(&ProgressChoice::Default, kind));
+            for s in &self.state.progress_sets {
+                ui.selectable_value(choice, ProgressChoice::Set(s.id.clone()), &s.name);
+            }
+            ui.selectable_value(choice, ProgressChoice::Own, self.choice_label(&ProgressChoice::Own, kind));
+        });
+    }
+
     fn claim_live(&mut self, name: &str) {
         match saves::claim_live(&self.paths, &self.state) {
             Ok(()) => self.info(format!("Save assigned to \"{name}\" again")),
@@ -621,7 +659,7 @@ impl App {
                     });
                 });
             }
-            Dialog::New { name, kind, keep_progress } => {
+            Dialog::New { name, kind, keep_progress, progress: choice } => {
                 modal(ctx, "New profile", 480.0).show(ctx, |ui| {
                     ui.label("Starts a fresh run. The mod list is taken from the current save,\nmultiplayer mods are switched on/off to match the type.");
                     ui.add_space(6.0);
@@ -630,23 +668,156 @@ impl App {
                         ui.text_edit_singleline(name);
                     });
                     kind_picker(ui, kind);
-                    let mode = self.state.settings.progress;
-                    if mode == progress::ProgressMode::PerProfile {
-                        ui.checkbox(keep_progress, "Keep progress (unlocked spells, perks and enemies)");
-                    } else {
-                        ui.label(RichText::new(format!("Progress: {} (see Settings)", mode.label().to_lowercase())).small().color(theme::INK_MUTED));
+                    ui.horizontal(|ui| {
+                        ui.label("Progress:");
+                        self.progress_picker(ui, "new_progress", choice, *kind);
+                    });
+                    let own = {
+                        let tmp = Profile { id: String::new(), name: String::new(), kind: *kind, note: String::new(), protected: false, created: String::new(), last_used: None, progress: choice.clone() };
+                        saves::pool_of(&self.state, &tmp).is_none()
+                    };
+                    if own {
+                        ui.checkbox(keep_progress, "Start with the progress of the save in Noita");
                     }
                     ui.horizontal(|ui| {
                         if ui.button("Create").clicked() && !name.trim().is_empty() {
-                            let (n, k, kp) = (name.clone(), *kind, *keep_progress && mode == progress::ProgressMode::PerProfile);
+                            let (n, k, kp, c) = (name.clone(), *kind, *keep_progress && own, choice.clone());
                             self.job("Create", false, move |p, _| {
                                 let template = p.live_save.clone();
-                                let prof = saves::create_profile(p, &n, k, kp, template.exists().then_some(template.as_path()))?;
+                                let mut prof = saves::create_profile(p, &n, k, kp, template.exists().then_some(template.as_path()))?;
+                                prof.progress = c;
+                                saves::save_profile(p, &prof)?;
                                 Ok(format!("Profile \"{}\" created", prof.name))
                             });
                             keep = false;
                         }
                         if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                    });
+                });
+            }
+            Dialog::SetProgress { id, choice } => {
+                let prof = self.profiles.iter().find(|p| &p.id == id).cloned();
+                let live = self.live == LiveStatus::Owned(id.clone());
+                modal(ctx, "Change progress?", 520.0).show(ctx, |ui| {
+                    let Some(prof) = prof else {
+                        keep = false;
+                        return;
+                    };
+                    let from = self.choice_label(&prof.progress, prof.kind);
+                    let to = self.choice_label(choice, prof.kind);
+                    ui.label(format!("\"{}\" switches from \"{from}\" to \"{to}\".", prof.name));
+                    ui.label(
+                        RichText::new(format!(
+                            "Its progress is first saved into \"{from}\" and backed up in backups\\_progress. Then it gets exactly the unlocks of \"{to}\"{}. The run itself is not touched.",
+                            if *choice == ProgressChoice::Own { " (it keeps what it has)" } else { "" }
+                        ))
+                        .small()
+                        .color(theme::INK_MUTED),
+                    );
+                    if live && self.game_running() {
+                        ui.label(RichText::new("This profile is in Noita right now – close the game first.").color(theme::WARN));
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!(live && self.game_running()), egui::Button::new(RichText::new("Switch progress").strong())).clicked() {
+                            let (id, c) = (id.clone(), choice.clone());
+                            self.job("Progress", live, move |p, st| saves::set_profile_progress(p, st, &id, c));
+                            keep = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            keep = false;
+                        }
+                    });
+                });
+            }
+            Dialog::ProgressSets { new_name, from, renaming, confirm_delete } => {
+                modal(ctx, "Progress sets", 560.0).show(ctx, |ui| {
+                    ui.label("Progress sets work like separate save slots: one with everything unlocked, one for challenge runs … Profiles using the same set share their unlocks. Pick the set for a profile under Progress in the profile view.");
+                    ui.add_space(8.0);
+                    let sets = self.state.progress_sets.clone();
+                    if sets.is_empty() {
+                        ui.label(RichText::new("No sets yet.").color(theme::INK_MUTED));
+                    }
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for s in &sets {
+                            let users: Vec<String> =
+                                self.profiles.iter().filter(|p| p.progress == ProgressChoice::Set(s.id.clone())).map(|p| p.name.clone()).collect();
+                            let (flags, enemies) = progress::counts(&progress::pool_dir(&self.paths, &s.id));
+                            ui.horizontal_wrapped(|ui| match renaming {
+                                Some((rid, text)) if *rid == s.id => {
+                                    ui.text_edit_singleline(text);
+                                    if ui.button("Save").clicked() && !text.trim().is_empty() {
+                                        if let Err(e) = saves::rename_set(&self.paths, &mut self.state, &s.id, text) {
+                                            self.info(format!("ERROR: {e:#}"));
+                                        }
+                                        *renaming = None;
+                                    } else if ui.button("Cancel").clicked() {
+                                        *renaming = None;
+                                    }
+                                }
+                                _ => {
+                                    ui.label(RichText::new(&s.name).strong());
+                                    ui.label(RichText::new(format!("{flags} unlocks · {enemies} enemies")).small().color(theme::INK_MUTED));
+                                    if ui.small_button("Rename").clicked() {
+                                        *renaming = Some((s.id.clone(), s.name.clone()));
+                                    }
+                                    if ui.add_enabled(self.busy.is_none(), egui::Button::new("Delete").small()).clicked() {
+                                        *confirm_delete = Some(s.id.clone());
+                                    }
+                                }
+                            });
+                            let used = if users.is_empty() { "not used by any profile".to_string() } else { format!("used by {}", users.join(", ")) };
+                            ui.label(RichText::new(used).small().color(theme::INK_2));
+                            if confirm_delete.as_deref() == Some(s.id.as_str()) {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(RichText::new("Delete? Its profiles go back to the default progress. The set is moved to backups\\_deleted.").color(theme::WARN));
+                                    if ui.add(theme::danger_button("Delete set")).clicked() {
+                                        let id = s.id.clone();
+                                        self.job("Progress", !users.is_empty(), move |p, st| saves::delete_set(p, st, &id));
+                                        *confirm_delete = None;
+                                    }
+                                    if ui.button("Cancel").clicked() {
+                                        *confirm_delete = None;
+                                    }
+                                });
+                            }
+                            ui.add_space(6.0);
+                        }
+                    });
+                    ui.separator();
+                    theme::caption(ui, "New set", theme::INK_MUTED);
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(new_name);
+                    });
+                    let pools = saves::existing_pools(&self.paths, &self.state);
+                    let from_label = |f: &Option<String>| match f {
+                        Some(id) => format!("Copy of {}", saves::pool_name(&self.state, id)),
+                        None => "Empty (everything locked, like a fresh Noita)".to_string(),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.label("Start:");
+                        egui::ComboBox::from_id_salt("set_from").width(320.0).selected_text(from_label(from)).show_ui(ui, |ui| {
+                            ui.selectable_value(from, None, from_label(&None));
+                            for id in &pools {
+                                ui.selectable_value(from, Some(id.clone()), from_label(&Some(id.clone())));
+                            }
+                        });
+                    });
+                    if from.is_none() {
+                        ui.label(RichText::new("Empty also locks the spells Noita only hands out after certain achievements.").small().color(theme::INK_MUTED));
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(self.busy.is_none() && !new_name.trim().is_empty(), egui::Button::new(RichText::new("Create set").strong())).clicked() {
+                            let (n, f) = (new_name.clone(), from.clone());
+                            self.job("Progress", false, move |p, st| saves::create_set(p, st, &n, f.as_deref()));
+                            new_name.clear();
+                        }
+                        if ui.button("Close").clicked() {
                             keep = false;
                         }
                     });
@@ -755,6 +926,7 @@ impl App {
                                 }
                             });
                         ui.label(RichText::new(s.progress.hint()).small());
+                        ui.label(RichText::new("Single profiles can use their own progress or a progress set instead (profile view → Progress).").small().color(theme::INK_MUTED));
                         if s.progress != self.state.settings.progress && s.progress != progress::ProgressMode::PerProfile {
                             ui.label(
                                 RichText::new("On save, the progress of the affected profiles is merged once the game is closed. Merged progress can't be split again; each profile's previous progress is kept in backups\\_progress.")

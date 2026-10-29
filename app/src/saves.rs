@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::progress::{self, ProgressMode};
+use crate::progress::{self, ProgressChoice, ProgressMode, ProgressSet};
 
 pub const MARKER: &str = ".nss_profile";
 
@@ -67,6 +67,8 @@ pub struct Profile {
     pub created: String,
     #[serde(default)]
     pub last_used: Option<String>,
+    #[serde(default)]
+    pub progress: ProgressChoice,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -117,6 +119,8 @@ pub struct State {
     pub settings: Settings,
     /// The progress mode all existing profiles were last merged for.
     pub progress_merged: Option<ProgressMode>,
+    /// Progress sets made by the user (folders in progress/<id>).
+    pub progress_sets: Vec<ProgressSet>,
 }
 
 #[derive(Clone, Debug)]
@@ -502,6 +506,7 @@ pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected:
         protected,
         created: now_human(),
         last_used: Some(now_human()),
+        progress: ProgressChoice::Default,
     };
     let res = (|| -> Result<()> {
         save_profile(p, &prof)?;
@@ -509,7 +514,7 @@ pub fn import_live(p: &Paths, st: &mut State, name: &str, kind: Kind, protected:
         if kind == Kind::EntangledWorlds && p.ew_state.exists() {
             copy_verified(&p.ew_state, &p.profile_ew(&id))?;
         }
-        progress::absorb(p, st.settings.progress, kind, &p.profile_save(&id))?;
+        progress::absorb(p, pool_of(st, &prof).as_deref(), &p.profile_save(&id))?;
         write_marker(p, &id)?;
         st.active = Some(id.clone());
         save_state(p, st)
@@ -534,6 +539,7 @@ pub fn create_profile(p: &Paths, name: &str, kind: Kind, keep_progress: bool, te
         protected: false,
         created: now_human(),
         last_used: None,
+        progress: ProgressChoice::Default,
     };
     save_profile(p, &prof)?;
     let save = p.profile_save(&id);
@@ -590,7 +596,7 @@ pub fn sync_active(p: &Paths, st: &State) -> Result<String> {
     if prof.kind == Kind::EntangledWorlds && p.ew_state.exists() {
         replace_dir(&p.ew_state, &p.profile_ew(&id), Some(&snap.join("ew_save_state")))?;
     }
-    progress::absorb(p, st.settings.progress, prof.kind, &p.profile_save(&id))?;
+    progress::absorb(p, pool_of(st, &prof).as_deref(), &p.profile_save(&id))?;
     rotate_snapshots(p, &id, st.settings.keep_snapshots);
     Ok(prof.name)
 }
@@ -641,7 +647,7 @@ pub fn switch_to(p: &Paths, st: &mut State, target: &str) -> Result<()> {
 
     // 3. Install the target, with the progress the other profiles of its pool made meanwhile.
     let src = p.profile_save(&tgt.id);
-    progress::apply(p, st.settings.progress, tgt.kind, &src)?;
+    progress::apply(p, pool_of(st, &tgt).as_deref(), &src)?;
     if src.exists() {
         replace_dir(&src, &p.live_save, None)?;
     } else {
@@ -671,7 +677,7 @@ pub fn restore_snapshot(p: &Paths, st: &State, id: &str, snap: &str) -> Result<(
     replace_dir(&snap_dir.join("save00"), &p.profile_save(id), Some(&safety.join("save00")))?;
     // Going back in a run does not take back what was unlocked since.
     if let Some(prof) = load_profiles(p).into_iter().find(|x| x.id == id) {
-        progress::apply(p, st.settings.progress, prof.kind, &p.profile_save(id))?;
+        progress::apply(p, pool_of(st, &prof).as_deref(), &p.profile_save(id))?;
     }
     if snap_dir.join("ew_save_state").exists() {
         replace_dir(&snap_dir.join("ew_save_state"), &p.profile_ew(id), Some(&safety.join("ew_save_state")))?;
@@ -721,7 +727,7 @@ pub fn merge_progress(p: &Paths, st: &mut State) -> Result<String> {
     if mode != ProgressMode::PerProfile {
         let profiles = load_profiles(p);
         let live = match live_status(p) {
-            LiveStatus::Owned(o) => profiles.iter().find(|x| x.id == o).map(|x| x.kind),
+            LiveStatus::Owned(o) => profiles.iter().find(|x| x.id == o).map(|x| pool_of(st, x)),
             _ => None,
         };
         let backup = p.backups().join("_progress").join(now_stamp());
@@ -732,21 +738,113 @@ pub fn merge_progress(p: &Paths, st: &mut State) -> Result<String> {
             progress::copy_progress(&p.live_save, &backup.join("_live"))?;
         }
         for prof in &profiles {
-            progress::absorb(p, mode, prof.kind, &p.profile_save(&prof.id))?;
+            progress::absorb(p, pool_of(st, prof).as_deref(), &p.profile_save(&prof.id))?;
         }
-        if let Some(kind) = live {
-            progress::absorb(p, mode, kind, &p.live_save)?;
+        if let Some(pool) = &live {
+            progress::absorb(p, pool.as_deref(), &p.live_save)?;
         }
         for prof in &profiles {
-            progress::apply(p, mode, prof.kind, &p.profile_save(&prof.id))?;
+            progress::apply(p, pool_of(st, prof).as_deref(), &p.profile_save(&prof.id))?;
         }
-        if let Some(kind) = live {
-            progress::apply(p, mode, kind, &p.live_save)?;
+        if let Some(pool) = &live {
+            progress::apply(p, pool.as_deref(), &p.live_save)?;
         }
     }
     st.progress_merged = Some(mode);
     save_state(p, st)?;
     Ok(format!("Progress: {}", mode.label().to_lowercase()))
+}
+
+/// The pool a profile's progress lives in (None: in the profile itself).
+pub fn pool_of(st: &State, prof: &Profile) -> Option<String> {
+    match &prof.progress {
+        ProgressChoice::Own => None,
+        ProgressChoice::Set(id) if st.progress_sets.iter().any(|s| &s.id == id) => Some(id.clone()),
+        _ => progress::pool(st.settings.progress, prof.kind).map(str::to_string),
+    }
+}
+
+/// Display name of a pool (progress set or built-in one).
+pub fn pool_name(st: &State, pool: &str) -> String {
+    st.progress_sets
+        .iter()
+        .find(|s| s.id == pool)
+        .map(|s| s.name.clone())
+        .or_else(|| progress::builtin_name(pool).map(str::to_string))
+        .unwrap_or_else(|| pool.to_string())
+}
+
+/// Pools that exist on disk, built-in ones first.
+pub fn existing_pools(p: &Paths, st: &State) -> Vec<String> {
+    let mut v: Vec<String> = ["all", "singleplayer", "multiplayer"].iter().map(|s| s.to_string()).collect();
+    v.extend(st.progress_sets.iter().map(|s| s.id.clone()));
+    v.retain(|id| progress::pool_dir(p, id).exists());
+    v
+}
+
+/// New progress set, empty (everything locked, like a fresh Noita) or a copy of an existing pool.
+pub fn create_set(p: &Paths, st: &mut State, name: &str, from: Option<&str>) -> Result<String> {
+    let base = format!("set{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+    let mut id = base.clone();
+    let mut n = 1;
+    while progress::pool_dir(p, &id).exists() {
+        n += 1;
+        id = format!("{base}_{n}");
+    }
+    let dir = progress::pool_dir(p, &id);
+    match from.map(|f| progress::pool_dir(p, f)).filter(|d| d.exists()) {
+        Some(src) => copy_dir(&src, &dir)?,
+        None => fs::create_dir_all(&dir)?,
+    }
+    st.progress_sets.push(ProgressSet { id, name: name.trim().to_string() });
+    save_state(p, st)?;
+    Ok(format!("Progress set \"{}\" created", name.trim()))
+}
+
+pub fn rename_set(p: &Paths, st: &mut State, id: &str, name: &str) -> Result<()> {
+    let set = st.progress_sets.iter_mut().find(|s| s.id == id).ok_or_else(|| anyhow!("Progress set not found."))?;
+    set.name = name.trim().to_string();
+    save_state(p, st)
+}
+
+/// Profiles using the set go back to the default progress; the set's folder moves to backups/_deleted.
+pub fn delete_set(p: &Paths, st: &mut State, id: &str) -> Result<String> {
+    let name = pool_name(st, id);
+    for prof in load_profiles(p).into_iter().filter(|x| x.progress == ProgressChoice::Set(id.to_string())) {
+        set_profile_progress(p, st, &prof.id, ProgressChoice::Default)?;
+    }
+    let dir = progress::pool_dir(p, id);
+    if dir.exists() {
+        move_dir(&dir, &p.backups().join("_deleted").join(format!("progress_{id}_{}", now_stamp())))?;
+    }
+    st.progress_sets.retain(|s| s.id != id);
+    save_state(p, st)?;
+    Ok(format!("Progress set \"{name}\" deleted (moved to backups\\_deleted)"))
+}
+
+/// Give a profile another progress. Its current progress goes into its old pool (if the run is
+/// in Noita it is saved first) and into backups/_progress; then it gets the new pool's progress.
+pub fn set_profile_progress(p: &Paths, st: &mut State, id: &str, choice: ProgressChoice) -> Result<String> {
+    let mut prof = load_profiles(p).into_iter().find(|x| x.id == id).ok_or_else(|| anyhow!("Profile not found."))?;
+    let live = st.active.as_deref() == Some(id) && live_status(p) == LiveStatus::Owned(id.to_string());
+    if live {
+        if live_is_other_run(p, st) {
+            bail!("Noita holds a different run than this profile – decide about that run first.");
+        }
+        sync_active(p, st)?;
+    } else {
+        progress::absorb(p, pool_of(st, &prof).as_deref(), &p.profile_save(id))?;
+    }
+    progress::copy_progress(&p.profile_save(id), &p.backups().join("_progress").join(now_stamp()).join(id))?;
+    prof.progress = choice;
+    save_profile(p, &prof)?;
+    let pool = pool_of(st, &prof);
+    progress::apply(p, pool.as_deref(), &p.profile_save(id))?;
+    if live {
+        progress::apply(p, pool.as_deref(), &p.live_save)?;
+    }
+    let what = pool.map(|x| pool_name(st, &x)).unwrap_or_else(|| "its own progress".into());
+    Ok(format!("\"{}\" now uses {what}", prof.name))
 }
 
 /// Deleting only moves the profile into backups/_deleted.
@@ -893,6 +991,53 @@ mod tests {
         assert!(p.profile_save(&mp.id).join("persistent/flags/action_b").exists());
         assert_eq!(st.progress_merged, Some(ProgressMode::Shared));
         assert_eq!(fs::read_dir(p.backups().join("_progress")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn progress_sets_work_like_save_slots() {
+        let e = env("sets");
+        let p = &e.p;
+        let mut st = State::default();
+        put(&p.live_save.join("player.xml"), "main-run");
+        put(&p.live_save.join("persistent/flags/action_all"), "x");
+        put(&p.live_save.join("stats/stats_bat.xml"), "<Stats kills=\"3\" >\n</Stats>\n");
+        let main = import_live(p, &mut st, "Main", Kind::Singleplayer, false).unwrap();
+        let ch = create_profile(p, "Challenge", Kind::Singleplayer, false, None).unwrap();
+
+        // An empty set: the challenge profile starts with nothing unlocked.
+        create_set(p, &mut st, "Challenge slot", None).unwrap();
+        let set = st.progress_sets[0].id.clone();
+        set_profile_progress(p, &mut st, &ch.id, ProgressChoice::Set(set.clone())).unwrap();
+        switch_to(p, &mut st, &ch.id).unwrap();
+        assert!(!p.live_save.join("persistent/flags/action_all").exists());
+        assert!(!p.live_save.join("stats/stats_bat.xml").exists());
+        put(&p.live_save.join("persistent/flags/action_challenge"), "x");
+
+        // Back to main: the challenge unlock stays in its set, main keeps everything.
+        switch_to(p, &mut st, &main.id).unwrap();
+        assert!(p.live_save.join("persistent/flags/action_all").exists());
+        assert!(!p.live_save.join("persistent/flags/action_challenge").exists());
+        assert_eq!(read(&p.live_save.join("player.xml")), "main-run");
+        assert_eq!(progress::counts(&progress::pool_dir(p, &set)), (1, 0));
+
+        // Moving the live main profile into the set (game closed) swaps its progress right away.
+        set_profile_progress(p, &mut st, &main.id, ProgressChoice::Set(set.clone())).unwrap();
+        assert!(p.live_save.join("persistent/flags/action_challenge").exists());
+        assert!(!p.live_save.join("persistent/flags/action_all").exists());
+        assert_eq!(read(&p.live_save.join("player.xml")), "main-run", "the run is untouched");
+        // ... and back: the shared progress still has everything.
+        set_profile_progress(p, &mut st, &main.id, ProgressChoice::Default).unwrap();
+        assert!(p.live_save.join("persistent/flags/action_all").exists());
+
+        // A copy starts with what the source has; deleting a set sends its profiles back to default.
+        create_set(p, &mut st, "Copy", Some("all")).unwrap();
+        let copy = st.progress_sets[1].id.clone();
+        assert!(progress::pool_dir(p, &copy).join("persistent/flags/action_all").exists());
+        delete_set(p, &mut st, &set).unwrap();
+        let ch = load_profiles(p).into_iter().find(|x| x.id == ch.id).unwrap();
+        assert_eq!(ch.progress, ProgressChoice::Default);
+        assert!(p.profile_save(&ch.id).join("persistent/flags/action_all").exists());
+        assert!(!progress::pool_dir(p, &set).exists());
     }
 
     #[test]
