@@ -345,7 +345,8 @@ impl App {
     /// Merge progress once after the mode changed (or on the first start with this feature).
     fn poll_progress(&mut self) {
         let mode = self.state.settings.progress;
-        if self.state.progress_merged == Some(mode) || self.progress_tried == Some(mode) || self.busy.is_some() || self.game_running() {
+        let merged = self.state.progress_merged == Some(mode) && self.state.progress_format >= progress::FORMAT;
+        if merged || self.progress_tried == Some(mode) || self.busy.is_some() || self.game_running() {
             return;
         }
         self.progress_tried = Some(mode);

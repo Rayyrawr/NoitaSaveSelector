@@ -4,6 +4,8 @@
 //!   persistent/flags/<flag>       one file per unlock / seen spell or perk
 //!   persistent/orbs_new/<n>       orbs found in any run
 //!   stats/stats_<enemy>.xml       kills and deaths per enemy
+//!   stats/_stats.salakieli        encrypted; its KEY_VALUE_STATS list is what the Progress screen
+//!                                 shows as killed enemies (and casts/picks per spell and perk)
 //! Since the app swaps the whole save00, every profile would otherwise keep its own progress.
 //! A pool (progress/<pool>/, same layout) holds the progress of all profiles that use it:
 //! saving a profile merges its progress into the pool (only adds: unknown flags/orbs are copied,
@@ -89,6 +91,9 @@ pub fn builtin_name(pool: &str) -> Option<&'static str> {
     }
 }
 
+/// 2: stats/_stats.salakieli joined the progress files. A higher value merges all profiles once more.
+pub const FORMAT: u32 = 2;
+
 pub fn pool_dir(p: &Paths, pool: &str) -> PathBuf {
     p.root.join("progress").join(pool)
 }
@@ -115,7 +120,10 @@ pub fn apply(p: &Paths, pool: Option<&str>, save: &Path) -> Result<()> {
 /// (unlocks, enemies) in a pool or save.
 pub fn counts(dir: &Path) -> (usize, usize) {
     let flags = files(&dir.join("persistent/flags")).len();
-    let enemies = files(&dir.join("stats")).iter().filter(|(n, _)| is_enemy_stats(n)).count();
+    let enemies = match read_game_stats(&dir.join(GAME_STATS)).as_deref().and_then(key_values) {
+        Some(kv) => kv.keys().filter(|k| !k.starts_with("action_") && !k.starts_with("perk_")).count(),
+        None => files(&dir.join("stats")).iter().filter(|(n, _)| is_enemy_stats(n)).count(),
+    };
     (flags, enemies)
 }
 
@@ -142,10 +150,23 @@ fn replace(src: &Path, dst: &Path) -> Result<()> {
             fs::copy(&from, dst.join("stats").join(name))?;
         }
     }
+    // Only the list is progress; the rest of _stats (this run, best run) stays the save's own.
+    if let Some(theirs) = read_game_stats(&src.join(GAME_STATS)) {
+        let to = dst.join(GAME_STATS);
+        match read_game_stats(&to) {
+            Some(ours) => {
+                if let Some(text) = key_values(&theirs).and_then(|kv| with_key_values(&ours, &kv)) {
+                    write_game_stats(&to, &text)?;
+                }
+            }
+            None if !to.exists() => write_game_stats(&to, &theirs)?,
+            None => {} // unreadable: leave Noita's file alone
+        }
+    }
     Ok(())
 }
 
-/// Copy the progress files of `save` (persistent/, stats/stats_*.xml) to `dst`, for backups.
+/// Copy the progress files of `save` (persistent/, stats/stats_*.xml, stats/_stats) to `dst`, for backups.
 pub fn copy_progress(save: &Path, dst: &Path) -> Result<()> {
     for sub in ["persistent/flags", "persistent/orbs_new"] {
         for (name, from) in files(&save.join(sub)) {
@@ -159,6 +180,10 @@ pub fn copy_progress(save: &Path, dst: &Path) -> Result<()> {
             fs::create_dir_all(dst.join("stats"))?;
             fs::copy(&from, dst.join("stats").join(name))?;
         }
+    }
+    if save.join(GAME_STATS).exists() {
+        fs::create_dir_all(dst.join("stats"))?;
+        fs::copy(save.join(GAME_STATS), dst.join(GAME_STATS))?;
     }
     Ok(())
 }
@@ -187,6 +212,18 @@ pub fn merge(src: &Path, dst: &Path) -> Result<()> {
         if let Some(text) = merged {
             fs::create_dir_all(dst.join("stats"))?;
             fs::write(&to, text).with_context(|| format!("Write: {}", to.display()))?;
+        }
+    }
+    if let Some(theirs) = read_game_stats(&src.join(GAME_STATS)) {
+        let to = dst.join(GAME_STATS);
+        match read_game_stats(&to) {
+            Some(ours) => {
+                if let Some(text) = merge_game_stats(&ours, &theirs) {
+                    write_game_stats(&to, &text)?;
+                }
+            }
+            None if !to.exists() => write_game_stats(&to, &theirs)?,
+            None => {}
         }
     }
     Ok(())
@@ -311,6 +348,74 @@ fn merge_stats(ours: &str, theirs: &str) -> Option<String> {
     (write_stats(&a, "\n") != before).then(|| write_stats(&a, nl))
 }
 
+// ---------------------------------------------------------------- _stats.salakieli
+
+const GAME_STATS: &str = "stats/_stats.salakieli";
+
+/// Noita's .salakieli files are AES-128-CTR; each file kind has its own fixed key and IV.
+fn crypt(data: &[u8]) -> Vec<u8> {
+    use aes::cipher::{KeyIvInit, StreamCipher};
+    let mut out = data.to_vec();
+    ctr::Ctr128BE::<aes::Aes128>::new(b"SecretsOfTheAllS".into(), b"ThreeEyesAreWatc".into()).apply_keystream(&mut out);
+    out
+}
+
+/// The decrypted text, None when missing or not what we expect.
+fn read_game_stats(path: &Path) -> Option<String> {
+    let text = String::from_utf8(crypt(&fs::read(path).ok()?)).ok()?;
+    text.starts_with("<GameStats").then_some(text)
+}
+
+fn write_game_stats(path: &Path, text: &str) -> Result<()> {
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(path, crypt(text.as_bytes())).with_context(|| format!("Write: {}", path.display()))
+}
+
+/// Byte range of the lines between <KEY_VALUE_STATS> and </KEY_VALUE_STATS>.
+fn kv_range(text: &str) -> Option<std::ops::Range<usize>> {
+    let open = text.find("<KEY_VALUE_STATS>")?;
+    let start = open + text[open..].find('\n')? + 1;
+    let close = start + text[start..].find("</KEY_VALUE_STATS>")?;
+    let end = text[..close].rfind('\n').map_or(close, |i| i + 1).max(start);
+    Some(start..end)
+}
+
+/// `<E key=".." value=".." >` pairs of the KEY_VALUE_STATS list; None for anything unexpected.
+fn key_values(text: &str) -> Option<BTreeMap<String, i64>> {
+    let mut map = BTreeMap::new();
+    for l in text[kv_range(text)?].lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if l == "</E>" {
+            continue;
+        }
+        if !l.starts_with("<E ") {
+            return None;
+        }
+        let a = tag_attrs(l);
+        let get = |n: &str| a.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+        map.insert(get("key")?, get("value")?.parse().ok()?);
+    }
+    Some(map)
+}
+
+/// `text` with its KEY_VALUE_STATS list replaced by `kv`; None when nothing would change.
+fn with_key_values(text: &str, kv: &BTreeMap<String, i64>) -> Option<String> {
+    key_values(text)?;
+    let range = kv_range(text)?;
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let list: String = kv.iter().map(|(k, v)| format!("    <E key=\"{k}\" value=\"{v}\" >{nl}    </E>{nl}")).collect();
+    (text[range.clone()] != list).then(|| format!("{}{list}{}", &text[..range.start], &text[range.end..]))
+}
+
+/// Per-key maximum of both lists, written into `ours`. None when nothing changes.
+fn merge_game_stats(ours: &str, theirs: &str) -> Option<String> {
+    let (mut a, b) = (key_values(ours)?, key_values(theirs)?);
+    for (k, v) in b {
+        let e = a.entry(k).or_insert(v);
+        *e = (*e).max(v);
+    }
+    with_key_values(ours, &a)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +437,52 @@ mod tests {
         assert_eq!(m.maps[1].1["bat"], 4);
         assert!(merge_stats(&merge_stats(A, B).unwrap(), A).is_none(), "nothing new: file stays untouched");
         assert!(merge_stats(A, "<Stats kills=\"x\" >").is_none(), "unreadable input is ignored");
+    }
+
+    const G: &str = "<GameStats STATS_VERSION=\"4\" session_dead=\"0\" >\n  <KEY_VALUE_STATS>\n    <E key=\"action_bomb\" value=\"3\" >\n    </E>\n    <E key=\"zombie\" value=\"5\" >\n    </E>\n  </KEY_VALUE_STATS>\n  <session enemies_killed=\"2\" killed_by=\"x\" >\n  </session>\n</GameStats>\n";
+    const H: &str = "<GameStats STATS_VERSION=\"4\" session_dead=\"1\" >\n  <KEY_VALUE_STATS>\n    <E key=\"bat\" value=\"1\" >\n    </E>\n    <E key=\"zombie\" value=\"2\" >\n    </E>\n  </KEY_VALUE_STATS>\n  <session enemies_killed=\"9\" killed_by=\"y\" >\n  </session>\n</GameStats>\n";
+
+    #[test]
+    fn game_stats_round_trip_and_merge() {
+        assert_eq!(with_key_values(G, &key_values(G).unwrap()), None, "same list: unchanged");
+        let m = merge_game_stats(G, H).unwrap();
+        let kv = key_values(&m).unwrap();
+        assert_eq!((kv["bat"], kv["zombie"], kv["action_bomb"]), (1, 5, 3));
+        assert!(m.contains("killed_by=\"x\""), "the rest of the file stays ours");
+        assert_eq!(merge_game_stats(&m, H), None);
+        assert_eq!(crypt(&crypt(G.as_bytes())), G.as_bytes());
+    }
+
+    #[test]
+    fn game_stats_follow_the_pool() {
+        let t = std::env::temp_dir().join(format!("nss_gs_{}", std::process::id()));
+        let (pool, save) = (t.join("pool"), t.join("save"));
+        let _ = fs::remove_dir_all(&t);
+        write_game_stats(&save.join(GAME_STATS), G).unwrap();
+        merge(&save, &pool).unwrap();
+        assert_eq!(read_game_stats(&pool.join(GAME_STATS)).unwrap(), G, "the first save starts the pool");
+        write_game_stats(&t.join("other").join(GAME_STATS), H).unwrap();
+        merge(&t.join("other"), &pool).unwrap();
+        replace(&pool, &save).unwrap();
+        let got = read_game_stats(&save.join(GAME_STATS)).unwrap();
+        assert_eq!(key_values(&got).unwrap().len(), 3);
+        assert!(got.contains("killed_by=\"x\""));
+        assert_eq!(counts(&save).1, 2);
+        let fresh = t.join("fresh");
+        fs::create_dir_all(&fresh).unwrap();
+        replace(&pool, &fresh).unwrap();
+        assert_eq!(key_values(&read_game_stats(&fresh.join(GAME_STATS)).unwrap()).unwrap().len(), 3, "a new profile gets the list");
+        fs::remove_dir_all(&t).unwrap();
+    }
+
+    /// NSS_GAME_STATS=<a _stats.salakieli>: must decrypt and survive a round trip unchanged.
+    #[test]
+    #[ignore]
+    fn real_game_stats() {
+        let text = read_game_stats(Path::new(&std::env::var("NSS_GAME_STATS").unwrap())).unwrap();
+        let kv = key_values(&text).unwrap();
+        assert_eq!(with_key_values(&text, &kv), None);
+        eprintln!("{} entries", kv.len());
     }
 
     /// NSS_STATS=<a save00\stats folder>: every enemy file must parse and survive a round trip.

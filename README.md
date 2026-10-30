@@ -47,7 +47,7 @@ The type (Entangled Worlds / Noita Together / Singleplayer) is detected from the
 `save_shared` and the EW settings are left alone.
 
 ## Progress
-Noita's Progress screen (unlocked spells and perks in `save00\persistent`, enemies in `save00\stats`) can be shared between profiles. Settings → Progress:
+Noita's Progress screen (unlocked spells and perks in `save00\persistent`, enemies in `save00\stats`, the list of killed enemies in `save00\stats\_stats.salakieli`) can be shared between profiles. Settings → Progress:
 
 ![Progress setting](docs/settings-progress.png)
 

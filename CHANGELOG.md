@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.2 – 2026-10-30
+- Shared progress now really includes the enemies: Noita's Progress screen takes the killed enemies from `stats\_stats.salakieli` (encrypted), which wasn't shared so far. New profiles showed only the enemies killed in them
+- On the first start the existing profiles are merged once more so every profile gets the full enemy list (previous progress backed up in `backups\_progress`)
+- Only the list behind the Progress screen is shared; the current and best run stats in that file stay with each profile
+
 ## 1.4.1 – 2026-10-29
 - Settings: a missing arrow glyph in the progress hint showed as a box
 - README: screenshots

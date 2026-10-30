@@ -119,6 +119,8 @@ pub struct State {
     pub settings: Settings,
     /// The progress mode all existing profiles were last merged for.
     pub progress_merged: Option<ProgressMode>,
+    /// Which progress files that merge covered (see progress::FORMAT).
+    pub progress_format: u32,
     /// Progress sets made by the user (folders in progress/<id>).
     pub progress_sets: Vec<ProgressSet>,
 }
@@ -751,6 +753,7 @@ pub fn merge_progress(p: &Paths, st: &mut State) -> Result<String> {
         }
     }
     st.progress_merged = Some(mode);
+    st.progress_format = progress::FORMAT;
     save_state(p, st)?;
     Ok(format!("Progress: {}", mode.label().to_lowercase()))
 }
@@ -1119,7 +1122,7 @@ mod tests {
     fn real_data_merge_progress() {
         let p = Paths::detect();
         assert!(std::env::var_os("NSS_LIVE_SAVE").is_some(), "only run against a sandbox copy");
-        let count = |d: &Path| (fs::read_dir(d.join("persistent/flags")).map(|r| r.count()).unwrap_or(0), fs::read_dir(d.join("stats")).map(|r| r.count()).unwrap_or(0));
+        let count = |d: &Path| progress::counts(d);
         let mut st = load_state(&p);
         for prof in load_profiles(&p) {
             eprintln!("before {}: {:?}", prof.name, count(&p.profile_save(&prof.id)));
